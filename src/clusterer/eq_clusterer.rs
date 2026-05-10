@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::{ClusterPoint, Clusters};
+use crate::chunkfs_sbc::{ClusterPoint, Clusters, EqCluster};
 use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
@@ -6,29 +6,22 @@ use std::collections::HashMap;
 
 pub struct EqClusterer;
 
-impl<Hash: SBCHash> Clusterer<Hash> for EqClusterer {
+impl<Hash: SBCHash + std::fmt::Debug> Clusterer<Hash> for EqClusterer {
     fn clusterize<'a>(
         &mut self,
         chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>,
     ) -> (Clusters<'a, Hash>, ClusteringMeasurements) {
-        let mut clusters: Clusters<Hash> = HashMap::default();
-
+        let mut clusters: Clusters<Hash> = Clusters(HashMap::default());
         let mut total_cluster_size: usize = 0;
-        let mut number_of_vertices_in_cluster = HashMap::new();
-        let mut parent_vertices: Vec<u32> = Vec::new();
-
+        let number_of_vertices_in_cluster = HashMap::new();
         for (sbc_hash, data_container) in chunk_sbc_hash {
-            let key = sbc_hash.get_key_for_graph_clusterer();
-            parent_vertices.push(key);
-            number_of_vertices_in_cluster.insert(key, 1);
+            let cluster = clusters.partial_search(sbc_hash.clone(), 5);
+            //let cluster = clusters.0.entry(sbc_hash.clone()).or_insert(vec![]);
 
-            let cluster = clusters.entry(sbc_hash.clone()).or_default();
             cluster.push((sbc_hash, data_container));
-
             total_cluster_size += 1;
         }
-
-        let distance_to_other_clusters = calculate_distance_to_other_vertices(parent_vertices);
+        let distance_to_other_clusters =  HashMap::new();
         let distance_to_vertices_in_cluster = HashMap::new();
         let cluster_dedup_ratio = HashMap::new();
         let number_of_clusters = total_cluster_size;

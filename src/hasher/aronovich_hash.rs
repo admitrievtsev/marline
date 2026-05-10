@@ -62,6 +62,10 @@ impl SBCHash for AronovichHash {
     fn get_key_for_graph_clusterer(&self) -> u32 {
         self.hash
     }
+
+    fn as_slice(&self) -> &[u64] {
+        unimplemented!()
+    }
 }
 pub struct AronovichHasher;
 

@@ -144,7 +144,7 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
         &mut self,
         chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>,
     ) -> (Clusters<'a, Hash>, ClusteringMeasurements) {
-        let mut clusters: Clusters<Hash> = HashMap::default();
+        let mut clusters: Clusters<Hash> = Clusters(HashMap::default());
         let mut total_cluster_size = 0;
         let mut number_of_clusters = 0;
         let mut number_of_vertices_in_cluster = HashMap::new();
@@ -175,7 +175,7 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
             }
 
             // Group the chunk into the cluster identified by the parent's hash
-            let cluster = clusters.entry(Hash::new_with_u32(parent_key)).or_default();
+            let cluster = clusters.0.entry(Hash::new_with_u32(parent_key)).or_default();
             cluster.push((sbc_hash, data_container));
         }
 
