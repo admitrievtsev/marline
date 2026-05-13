@@ -9,7 +9,7 @@ use sbc_algorithm::{clusterer, decoder, hasher};
 use sbc_algorithm::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
 use std::time::Instant;
-use std::{fs, io};
+use std::io;
 
 #[derive(Debug)]
 struct Measurement {
@@ -22,7 +22,8 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    let data = fs::read("../runner/files/my_data")?;
+    //let data = fs::read("../runner/files/my_data")?;
+    let data = vec![0u8; 10 * 1024 * 1024];
     let num_iterations = 10;
     let mut measurements = Vec::new();
 
