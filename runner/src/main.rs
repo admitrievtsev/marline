@@ -22,7 +22,7 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
+    let data = fs::read("../runner/files/my_data")?;
     let num_iterations = 10;
     let mut measurements = Vec::new();
 
