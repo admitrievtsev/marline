@@ -1,5 +1,5 @@
 use crate::chunkfs_sbc::{ClusterPoint, Clusters, EqCluster};
-use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
+use crate::clusterer::Clusterer;
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
@@ -15,13 +15,13 @@ impl<Hash: SBCHash + std::fmt::Debug> Clusterer<Hash> for EqClusterer {
         let mut total_cluster_size: usize = 0;
         let number_of_vertices_in_cluster = HashMap::new();
         for (sbc_hash, data_container) in chunk_sbc_hash {
-            let cluster = clusters.partial_search(sbc_hash.clone(), 5);
+            let cluster = clusters.partial_search(sbc_hash.clone(), 3);
             //let cluster = clusters.0.entry(sbc_hash.clone()).or_insert(vec![]);
 
             cluster.push((sbc_hash, data_container));
             total_cluster_size += 1;
         }
-        let distance_to_other_clusters =  HashMap::new();
+        let distance_to_other_clusters = HashMap::new();
         let distance_to_vertices_in_cluster = HashMap::new();
         let cluster_dedup_ratio = HashMap::new();
         let number_of_clusters = total_cluster_size;

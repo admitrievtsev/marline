@@ -71,19 +71,22 @@ pub trait Encoder {
         let processed_data = Mutex::new(0);
         let target_map_ref = Arc::new(Mutex::new(target_map));
         pool.install(|| {
-            clusters.0.par_iter_mut().for_each(|(parent_hash, cluster)| {
-                let data_analyse = self.encode_cluster(
-                    target_map_ref.clone(),
-                    cluster.as_mut_slice(),
-                    parent_hash.clone(),
-                );
+            clusters
+                .0
+                .par_iter_mut()
+                .for_each(|(parent_hash, cluster)| {
+                    let data_analyse = self.encode_cluster(
+                        target_map_ref.clone(),
+                        cluster.as_mut_slice(),
+                        parent_hash.clone(),
+                    );
 
-                let mut data_left_lock = data_left.lock().unwrap();
-                *data_left_lock += data_analyse.0;
+                    let mut data_left_lock = data_left.lock().unwrap();
+                    *data_left_lock += data_analyse.0;
 
-                let mut processed_data_lock = processed_data.lock().unwrap();
-                *processed_data_lock += data_analyse.1;
-            });
+                    let mut processed_data_lock = processed_data.lock().unwrap();
+                    *processed_data_lock += data_analyse.1;
+                });
         });
         (
             data_left.into_inner().unwrap(),
@@ -141,12 +144,12 @@ fn count_delta_chunks_with_hash<D: Decoder, Hash: SBCHash>(
         .filter(|(sbc_key, _)| {
             sbc_key.hash == *hash
                 && match sbc_key.chunk_type {
-                ChunkType::Delta {
-                    parent_hash: _,
-                    number: _,
-                } => true,
-                ChunkType::Simple => false,
-            }
+                    ChunkType::Delta {
+                        parent_hash: _,
+                        number: _,
+                    } => true,
+                    ChunkType::Simple => false,
+                }
         })
         .count();
     count as u16

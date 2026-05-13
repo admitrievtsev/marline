@@ -2,7 +2,7 @@ use crate::encoder::GEAR;
 use crate::hasher::{SBCHash, SBCHasher};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-pub const SUPER_FEATURES_NUM: usize = 16;
+pub const SUPER_FEATURES_NUM: usize = 8;
 pub const FEATURES_NUM: usize = 16;
 #[derive(Default, Debug)]
 pub struct OdessHash {
@@ -108,13 +108,13 @@ impl SBCHasher for OdessHasher {
             }
         }
         if SUPER_FEATURES_NUM != FEATURES_NUM {
-            let mut group_1 = features[0..SUPER_FEATURES_NUM].iter().cloned().collect::<Vec<u64>>();
-            let mut group_2 = features[SUPER_FEATURES_NUM..].iter().cloned().collect::<Vec<u64>>();
+            let mut group_1 = features[0..SUPER_FEATURES_NUM].to_vec();
+            let mut group_2 = features[SUPER_FEATURES_NUM..].to_vec();
             group_1.sort();
             group_2.sort();
 
             let mut sfs = [0; SUPER_FEATURES_NUM];
-            for i in 0..SUPER_FEATURES_NUM  {
+            for i in 0..SUPER_FEATURES_NUM {
                 let mut hasher = DefaultHasher::new();
                 hasher.write_u64(group_1[i]);
                 hasher.write_u64(group_2[i]);
@@ -122,9 +122,10 @@ impl SBCHasher for OdessHasher {
             }
 
             OdessHash { hash: sfs }
-        }
-        else {
+        } else {
             let mut slice = [0u64; SUPER_FEATURES_NUM];
+
+            #[allow(clippy::manual_memcpy)]
             for i in 0..SUPER_FEATURES_NUM {
                 slice[i] = features[i];
             }
@@ -143,8 +144,8 @@ impl OdessHasher {
     pub fn new(sampling_ratio: u32) -> Self {
         let sampling_rate = 1u64 << sampling_ratio;
 
-        let linear_coeffs =
-            [0x3f9c9a5d4e8a3b2a,
+        let linear_coeffs = [
+            0x3f9c9a5d4e8a3b2a,
             0x7d4f1b2c3a6e5d8c,
             0x1a2b3c4d5e6f7a8b,
             0x2c3d4e5f6a7b8c9d,
@@ -159,7 +160,8 @@ impl OdessHasher {
             0x0c1d2e3f,
             0x1e2f3a4b,
             0x2c3d4e5f,
-            0x3a4b5c6d];
+            0x3a4b5c6d,
+        ];
 
         OdessHasher {
             sampling_rate,

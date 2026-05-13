@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use crate::clusterer::Clusterer;
 use crate::decoder::Decoder;
 use crate::encoder::Encoder;
@@ -10,7 +9,6 @@ use chunkfs::{
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::io;
 use std::io::{Error, ErrorKind};
 use std::sync::Mutex;
@@ -19,47 +17,48 @@ use std::time::Instant;
 const NUM_THREADS_FOR_HASHING: usize = 1;
 
 pub type ClusterPoint<'a, Hash> = (Hash, &'a mut &'a mut DataContainer<SBCKey<Hash>>);
-pub struct Clusters<'a, Hash: SBCHash> (pub HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>);
+pub struct Clusters<'a, Hash: SBCHash>(pub HashMap<Hash, Vec<ClusterPoint<'a, Hash>>>);
 
-pub trait EqCluster<'a, Hash: SBCHash>{
-    fn partial_search(&mut self, key: Hash, max_mismatches: usize) -> &mut Vec<ClusterPoint<'a, Hash>>;
+pub trait EqCluster<'a, Hash: SBCHash> {
+    fn partial_search(
+        &mut self,
+        key: Hash,
+        max_mismatches: usize,
+    ) -> &mut Vec<ClusterPoint<'a, Hash>>;
 }
 
 impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
     fn partial_search(&mut self, key: Hash, matches: usize) -> &mut Vec<ClusterPoint<'a, Hash>> {
-        let entry = self.0.get_mut(&key);
+        let _entry = self.0.get_mut(&key);
         match self.0.contains_key(&key) {
-            true => {
-                return self.0.get_mut(&key).unwrap();
-            }
-            ,
+            true => self.0.get_mut(&key).unwrap(),
             false => {
                 let key_parts = key.as_slice();
                 //println!("Searching for key {:?}", key_parts);
                 // Search fo
                 let mut part_key = None;
-                for (k, v) in self.0.iter()  {
+                for (k, _v) in self.0.iter() {
                     let mut current_matches = 0;
 
+                    #[allow(clippy::needless_range_loop)]
                     for part_idx in 0..k.as_slice().len() {
-                        if k.as_slice()[part_idx] == key_parts[part_idx]  {
+                        if k.as_slice()[part_idx] == key_parts[part_idx] {
                             current_matches += 1;
                             if current_matches == matches {
-                                break
+                                break;
                             }
                         }
                     }
 
                     if current_matches < matches {
-                        continue
-                    }
-                    else {
+                        continue;
+                    } else {
                         part_key = Some(k.clone());
                         break;
                     }
                 }
-                if part_key.is_some() {
-                    return self.0.get_mut(&part_key.unwrap()).unwrap();
+                if let Some(part_key) = part_key {
+                    return self.0.get_mut(&part_key).unwrap();
                 }
                 self.0.insert(key.clone(), vec![]);
                 self.0.get_mut(&key).unwrap()
@@ -67,7 +66,6 @@ impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
         }
     }
 }
-
 
 /// Implements the `Database` trait for `SBCMap`, enabling it to act as a storage backend
 /// for chunk-based filesystems (`chunkfs`).

@@ -7,3 +7,4 @@ edition = "2021"
 [dependencies]
 sbc_algorithm = { path = ".." }
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", features = ["chunkers", "hashers"]}
+csv = "1.3"

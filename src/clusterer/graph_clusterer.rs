@@ -175,7 +175,10 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
             }
 
             // Group the chunk into the cluster identified by the parent's hash
-            let cluster = clusters.0.entry(Hash::new_with_u32(parent_key)).or_default();
+            let cluster = clusters
+                .0
+                .entry(Hash::new_with_u32(parent_key))
+                .or_default();
             cluster.push((sbc_hash, data_container));
         }
 
