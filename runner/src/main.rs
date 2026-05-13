@@ -1,11 +1,11 @@
 extern crate chunkfs;
 extern crate sbc_algorithm;
 
-use chunkfs::chunkers::{FastChunker, SizeParams, SuperChunker};
+use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
-use sbc_algorithm::encoder::{DdeltaEncoder, GdeltaEncoder, XdeltaEncoder};
-use sbc_algorithm::{clusterer, decoder, encoder, hasher};
+use sbc_algorithm::encoder::GdeltaEncoder;
+use sbc_algorithm::{clusterer, decoder, hasher};
 use sbc_algorithm::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -56,7 +56,7 @@ fn main() -> io::Result<()> {
         let cdc_time = total_start.elapsed();
 
         let scrub_start = Instant::now();
-        let res = fs.scrub()?;
+        let _res = fs.scrub()?;
         let scrub_time = scrub_start.elapsed();
 
         let sbc_dedup_ratio = fs.total_dedup_ratio();
@@ -92,7 +92,7 @@ fn save_to_csv(measurements: &[Measurement]) -> io::Result<()> {
     let mut wtr = csv::Writer::from_path("measurements_2.csv")?;
 
     // Write header
-    wtr.write_record(&[
+    wtr.write_record([
         "iteration",
         "cdc_dedup_ratio",
         "sbc_dedup_ratio",
