@@ -3,7 +3,7 @@ pub use odess_hasher::{OdessHash, OdessHasher};
 use std::hash;
 
 mod aronovich_hash;
-mod odess_hasher;
+pub mod odess_hasher;
 
 /// Defines core hash functionality for Similarity-Based Chunking (SBC).
 pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
