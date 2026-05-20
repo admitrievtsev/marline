@@ -1,23 +1,88 @@
 use crate::encoder::GEAR;
 use crate::hasher::{SBCHash, SBCHasher};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use rand;
+use crate::hasher::odess_hasher::IndexType::SuperFeatured;
 
 pub const SUPER_FEATURES_NUM: usize = 8;
-pub const FEATURES_NUM: usize = 16;
-#[derive(Default, Debug)]
+
+/// Configuración para la generación de super características en el algoritmo Odess.
+///
+/// Esta estructura define los parámetros necesarios para crear super características,
+/// que son combinaciones de características individuales agrupadas para mejorar
+/// la eficiencia del cálculo de hash.
+///
+/// # Campos
+///
+/// * `groups` - Número de grupos de características a crear. Debe ser mayor que cero.
+/// * `sf_num` - Número de super características por grupo. Debe ser mayor que cero.
+pub struct SuperFeatureConfig {
+    groups: usize,
+    sf_num: usize,
+}
+
+impl SuperFeatureConfig {
+    /// Crea una nueva configuración de super características.
+    ///
+    /// # Argumentos
+    ///
+    /// * `groups` - Número de grupos de características. Debe ser mayor que cero.
+    /// * `sf_num` - Número de super características por grupo. Debe ser mayor que cero.
+    ///
+    /// # Panics
+    ///
+    /// Esta función entrará en pánico si `groups` o `sf_num` son cero.
+    pub fn new(groups: usize, sf_num: usize) -> Self {
+        if groups == 0 {
+            panic!("Super Feature groups number cannot be zero");
+        }
+        if sf_num == 0 {
+            panic!("Super Feature number cannot be zero");
+        }
+        Self { groups, sf_num }
+    }
+}
+
+/// Tipo de índice utilizado para el cálculo de hash en el algoritmo Odess.
+///
+/// Este enumerador define dos estrategias diferentes para generar el hash:
+/// utilizando super características o características crudas.
+///
+/// # Variantes
+///
+/// * `SuperFeatured` - Utiliza super características agrupadas para el cálculo de hash.
+/// * `RawFeatured` - Utiliza características crudas sin agrupamiento para el cálculo de hash.
+pub enum IndexType {
+    /// Utiliza super características para el cálculo de hash.
+    ///
+    /// Esta variante agrupa las características en super características,
+    /// lo que puede mejorar la eficiencia y la precisión del cálculo de hash.
+    ///
+    /// # Ejemplo
+    ///
+    /// ```
+    /// use sbc_algorithm::hasher::odess_hasher::{IndexType, SuperFeatureConfig};
+    ///
+    /// let config = SuperFeatureConfig::new(2, 6);
+    /// let index_type = IndexType::SuperFeatured(config);
+    /// ```
+    SuperFeatured(SuperFeatureConfig),
+    
+    /// Utiliza características crudas para el cálculo de hash.
+    ///
+    /// Esta variante utiliza las características directamente sin agrupamiento,
+    /// especificando el número de características a utilizar.
+    RawFeatured(usize),
+}
+
+#[derive(Default, Debug, Clone)]
 pub struct OdessHash {
-    hash: [u64; SUPER_FEATURES_NUM],
+    hash: Vec<u64>,
 }
 
 impl Hash for OdessHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash.hash(state)
-    }
-}
-
-impl Clone for OdessHash {
-    fn clone(&self) -> Self {
-        OdessHash { hash: self.hash }
     }
 }
 
@@ -46,7 +111,7 @@ impl SBCHash for OdessHash {
             odess_hash.hash[1] = 0;
             odess_hash.hash[2] += 1;
         } else {
-            odess_hash.hash = [u64::MAX; SUPER_FEATURES_NUM]
+            odess_hash.hash = vec![u64::MAX; SUPER_FEATURES_NUM]
         }
         odess_hash
     }
@@ -63,7 +128,7 @@ impl SBCHash for OdessHash {
             odess_hash.hash[1] = u64::MAX;
             odess_hash.hash[2] -= 1;
         } else {
-            odess_hash.hash = [0u64; SUPER_FEATURES_NUM]
+            odess_hash.hash = vec![0u64; SUPER_FEATURES_NUM]
         }
         odess_hash
     }
@@ -73,21 +138,24 @@ impl SBCHash for OdessHash {
     }
 
     fn as_slice(&self) -> &[u64] {
-        &self.hash
+        self.hash.as_slice()
     }
 }
 
-/// Реализация метода Odess для вычисления признаков чанка
+
 pub struct OdessHasher {
     sampling_rate: u64,
-    linear_coeffs: [u64; FEATURES_NUM],
+    linear_coefficients: Vec<u64>,
+    index_type: IndexType,
+    features_num: usize,
 }
 
 impl SBCHasher for OdessHasher {
     type Hash = OdessHash;
     fn calculate_hash(&self, chunk: &[u8]) -> OdessHash {
-        let mut features = [u64::MAX; FEATURES_NUM];
-        let mask = self.sampling_rate - 1;
+        let mut features = vec![u64::MAX; self.features_num];
+
+        let mask = (1u64 << self.sampling_rate) - 1;
         let mut fp = 0u64;
 
         for &byte in chunk {
@@ -96,8 +164,8 @@ impl SBCHasher for OdessHasher {
 
             // Content-defined sampling
             if fp & mask == 0 {
-                for (i, feature) in features.iter_mut().enumerate() {
-                    let transform = self.linear_coeffs[i]
+                for (i, feature) in features.iter_mut().enumerate().take(self.features_num) {
+                    let transform = self.linear_coefficients[i]
                         .wrapping_mul(fp)
                         .wrapping_add(byte as u64)
                         % (1u64 << 32);
@@ -107,65 +175,69 @@ impl SBCHasher for OdessHasher {
                 }
             }
         }
-        if SUPER_FEATURES_NUM != FEATURES_NUM {
-            let mut group_1 = features[0..SUPER_FEATURES_NUM].to_vec();
-            let mut group_2 = features[SUPER_FEATURES_NUM..].to_vec();
-            group_1.sort();
-            group_2.sort();
 
-            let mut sfs = [0; SUPER_FEATURES_NUM];
-            for i in 0..SUPER_FEATURES_NUM {
-                let mut hasher = DefaultHasher::new();
-                hasher.write_u64(group_1[i]);
-                hasher.write_u64(group_2[i]);
-                sfs[i] = hasher.finish();
+        match &self.index_type {
+            IndexType::SuperFeatured(sf_cfg) => {
+                let mut super_features = vec![0u64; sf_cfg.sf_num];
+                let mut sf_groups = Vec::with_capacity(sf_cfg.sf_num);
+                for group_idx in 0..sf_cfg.groups {
+                    let group_start = group_idx * sf_cfg.sf_num;
+                    let group_end = group_start + sf_cfg.sf_num;
+                    
+                    if group_end <= features.len() {
+                        let mut group: Vec<u64> = features[group_start..group_end].to_vec();
+                        group.sort();
+                        sf_groups.push(group);
+                    }
+
+                    for i in 0..sf_cfg.sf_num {
+                        let mut hasher = DefaultHasher::new();
+                        for item in sf_groups.iter() {
+                            hasher.write_u64(item[i]);
+                        }
+                        let hash_value = hasher.finish();
+                        super_features[i] = hash_value;
+                    }
+                }
+
+                OdessHash { hash: super_features }
+            },
+            IndexType::RawFeatured(_) => {
+                OdessHash { hash: features.to_vec() }
             }
-
-            OdessHash { hash: sfs }
-        } else {
-            let mut slice = [0u64; SUPER_FEATURES_NUM];
-
-            #[allow(clippy::manual_memcpy)]
-            for i in 0..SUPER_FEATURES_NUM {
-                slice[i] = features[i];
-            }
-            OdessHash { hash: slice }
         }
+
+
     }
 }
 
 impl Default for OdessHasher {
+
     fn default() -> Self {
-        Self::new(7)
+        let config = SuperFeatureConfig::new(2, 6);
+
+        Self::new(7, SuperFeatured(config))
     }
 }
 
 impl OdessHasher {
-    pub fn new(sampling_ratio: u32) -> Self {
-        let sampling_rate = 1u64 << sampling_ratio;
+    pub fn new(sampling_rate: u64, index_type: IndexType) -> Self {
+        let features_num = match &index_type {
+            IndexType::SuperFeatured(sf_cfg) => sf_cfg.sf_num * sf_cfg.groups,
+            IndexType::RawFeatured(rf_num) => *rf_num,
+        };
 
-        let linear_coeffs = [
-            0x3f9c9a5d4e8a3b2a,
-            0x7d4f1b2c3a6e5d8c,
-            0x1a2b3c4d5e6f7a8b,
-            0x2c3d4e5f6a7b8c9d,
-            0x3e4f5a6b7c8d9e0f,
-            0x4a5b6c7d8e9fa0b1,
-            0x5c6d7e8f9a0b1c2d,
-            0x6e7f8a9b0c1d2e3f,
-            0x7a8b9c0d1e2f3a4b,
-            0x8c9daebf0c1d2e3a,
-            0x9ea0b1c2d3e4,
-            0xa2b3c4d5e6f7,
-            0x0c1d2e3f,
-            0x1e2f3a4b,
-            0x2c3d4e5f,
-            0x3a4b5c6d,
-        ];
+        let mut linear_coefficients = Vec::with_capacity(features_num);
+
+        for _ in 0..features_num {
+            linear_coefficients.push(rand::random::<u64>());
+        }
 
         OdessHasher {
             sampling_rate,
-            linear_coeffs,
+            linear_coefficients,
+            index_type,
+            features_num
         }
     }
 }

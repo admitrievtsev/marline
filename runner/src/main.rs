@@ -8,8 +8,8 @@ use sbc_algorithm::encoder::GdeltaEncoder;
 use sbc_algorithm::{clusterer, decoder, hasher};
 use sbc_algorithm::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
-use std::time::Instant;
 use std::io;
+use std::time::Instant;
 
 #[derive(Debug)]
 struct Measurement {
@@ -22,9 +22,9 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    //let data = fs::read("../runner/files/my_data")?;
+    // ;) let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
     let data = vec![0u8; 10 * 1024 * 1024];
-    let num_iterations = 10;
+    let num_iterations = 1;
     let mut measurements = Vec::new();
 
     println!("Starting {} iterations of measurements...", num_iterations);
@@ -40,7 +40,7 @@ fn main() -> io::Result<()> {
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
                 hasher::OdessHasher::default(),
-                clusterer::EqClusterer,
+                clusterer::EqClusterer::new(15),
                 GdeltaEncoder::new(false),
             )),
             Sha256Hasher::default(),

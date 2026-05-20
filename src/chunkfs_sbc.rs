@@ -3,6 +3,7 @@ use crate::decoder::Decoder;
 use crate::encoder::Encoder;
 use crate::hasher::SBCHasher;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
+
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
@@ -22,35 +23,35 @@ pub struct Clusters<'a, Hash: SBCHash>(pub HashMap<Hash, Vec<ClusterPoint<'a, Ha
 pub trait EqCluster<'a, Hash: SBCHash> {
     fn partial_search(
         &mut self,
-        key: Hash,
+        key: &Hash,
         max_mismatches: usize,
     ) -> &mut Vec<ClusterPoint<'a, Hash>>;
 }
 
 impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
-    fn partial_search(&mut self, key: Hash, matches: usize) -> &mut Vec<ClusterPoint<'a, Hash>> {
-        let _entry = self.0.get_mut(&key);
-        match self.0.contains_key(&key) {
-            true => self.0.get_mut(&key).unwrap(),
+    fn partial_search(&mut self, key: &Hash, matches: usize) -> &mut Vec<ClusterPoint<'a, Hash>> {
+        let _entry = self.0.get_mut(key);
+        match self.0.contains_key(key) {
+            true => self.0.get_mut(key).unwrap(),
             false => {
                 let key_parts = key.as_slice();
                 //println!("Searching for key {:?}", key_parts);
                 // Search fo
                 let mut part_key = None;
                 for (k, _v) in self.0.iter() {
-                    let mut current_matches = 0;
+                    let mut current_mismatches = 0;
 
                     #[allow(clippy::needless_range_loop)]
                     for part_idx in 0..k.as_slice().len() {
-                        if k.as_slice()[part_idx] == key_parts[part_idx] {
-                            current_matches += 1;
-                            if current_matches == matches {
+                        if k.as_slice()[part_idx] != key_parts[part_idx] {
+                            current_mismatches += 1;
+                            if current_mismatches >= matches {
                                 break;
                             }
                         }
                     }
 
-                    if current_matches < matches {
+                    if current_mismatches >= matches {
                         continue;
                     } else {
                         part_key = Some(k.clone());
@@ -61,7 +62,7 @@ impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
                     return self.0.get_mut(&part_key).unwrap();
                 }
                 self.0.insert(key.clone(), vec![]);
-                self.0.get_mut(&key).unwrap()
+                self.0.get_mut(key).unwrap()
             }
         }
     }
@@ -340,7 +341,7 @@ where
             });
         });
         let time_hashing = time_start.elapsed().as_secs_f64();
-        print!("{time_hashing:.4};");
+        print!("HashTime: {time_hashing:.4};");
 
         // 2. Clustering: group chunks by similarity
         let time_clusterize_start = time_start.elapsed();
@@ -349,13 +350,13 @@ where
             .clusterize(sbc_hash_chunk.into_inner().unwrap());
         let time_clusterize =
             time_start.elapsed().as_secs_f64() - time_clusterize_start.as_secs_f64();
-        print!("{time_clusterize:.4};");
+        print!("ClusterTime: {time_clusterize:.4};");
 
         // 3. Encoding: encode clusters and store in target map
         let time_encode_start = time_start.elapsed();
         let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
         let time_encode = time_start.elapsed().as_secs_f64() - time_encode_start.as_secs_f64();
-        print!("{time_encode:.4};");
+        print!("EncodeTime: {time_encode:.4};");
 
         let running_time = time_start.elapsed();
 

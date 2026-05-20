@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git" }
+rand = "0.8.5"
 rayon = "1.10"
 zstd = "0.13"
 thiserror = "2.0.12"
@@ -19,3 +20,6 @@ fasthash = "0.4.0"
 [dev-dependencies]
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", features = ["chunkers", "hashers"]}
 rand = "0.8.5"
+
+[profile.release]
+debug = true

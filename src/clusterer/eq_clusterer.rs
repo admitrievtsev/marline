@@ -4,7 +4,15 @@ use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 
-pub struct EqClusterer;
+pub struct EqClusterer {
+    match_range: usize
+}
+
+impl EqClusterer {
+    pub fn new(match_range: usize) -> Self {
+        EqClusterer { match_range }
+    }
+}
 
 impl<Hash: SBCHash + std::fmt::Debug> Clusterer<Hash> for EqClusterer {
     fn clusterize<'a>(
@@ -15,7 +23,7 @@ impl<Hash: SBCHash + std::fmt::Debug> Clusterer<Hash> for EqClusterer {
         let mut total_cluster_size: usize = 0;
         let number_of_vertices_in_cluster = HashMap::new();
         for (sbc_hash, data_container) in chunk_sbc_hash {
-            let cluster = clusters.partial_search(sbc_hash.clone(), 3);
+            let cluster = clusters.partial_search(&sbc_hash, self.match_range);
             //let cluster = clusters.0.entry(sbc_hash.clone()).or_insert(vec![]);
 
             cluster.push((sbc_hash, data_container));
