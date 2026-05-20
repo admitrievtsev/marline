@@ -5,7 +5,7 @@ use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 
 pub struct EqClusterer {
-    match_range: usize
+    match_range: usize,
 }
 
 impl EqClusterer {

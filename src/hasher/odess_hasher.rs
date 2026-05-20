@@ -1,8 +1,8 @@
 use crate::encoder::GEAR;
-use crate::hasher::{SBCHash, SBCHasher};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use rand;
 use crate::hasher::odess_hasher::IndexType::SuperFeatured;
+use crate::hasher::{SBCHash, SBCHasher};
+use rand;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 pub const SUPER_FEATURES_NUM: usize = 8;
 
@@ -67,7 +67,7 @@ pub enum IndexType {
     /// let index_type = IndexType::SuperFeatured(config);
     /// ```
     SuperFeatured(SuperFeatureConfig),
-    
+
     /// Utiliza características crudas para el cálculo de hash.
     ///
     /// Esta variante utiliza las características directamente sin agrupamiento,
@@ -142,7 +142,6 @@ impl SBCHash for OdessHash {
     }
 }
 
-
 pub struct OdessHasher {
     sampling_rate: u64,
     linear_coefficients: Vec<u64>,
@@ -183,7 +182,7 @@ impl SBCHasher for OdessHasher {
                 for group_idx in 0..sf_cfg.groups {
                     let group_start = group_idx * sf_cfg.sf_num;
                     let group_end = group_start + sf_cfg.sf_num;
-                    
+
                     if group_end <= features.len() {
                         let mut group: Vec<u64> = features[group_start..group_end].to_vec();
                         group.sort();
@@ -200,19 +199,18 @@ impl SBCHasher for OdessHasher {
                     }
                 }
 
-                OdessHash { hash: super_features }
-            },
-            IndexType::RawFeatured(_) => {
-                OdessHash { hash: features.to_vec() }
+                OdessHash {
+                    hash: super_features,
+                }
             }
+            IndexType::RawFeatured(_) => OdessHash {
+                hash: features.to_vec(),
+            },
         }
-
-
     }
 }
 
 impl Default for OdessHasher {
-
     fn default() -> Self {
         let config = SuperFeatureConfig::new(2, 6);
 
@@ -237,7 +235,7 @@ impl OdessHasher {
             sampling_rate,
             linear_coefficients,
             index_type,
-            features_num
+            features_num,
         }
     }
 }
