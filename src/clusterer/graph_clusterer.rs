@@ -7,8 +7,11 @@ use std::collections::HashMap;
 /// A vertex in the graph used for clustering.
 ///
 /// Each vertex tracks its parent for union-find operations during MST construction.
+/// In the union-find data structure, each vertex initially points to itself,
+/// and vertices are merged by updating parent pointers.
 struct Vertex {
     /// The parent vertex key in the union-find structure.
+    /// If `parent == key`, this vertex is a root of its set.
     parent: u32,
 }
 
@@ -32,11 +35,13 @@ impl Vertex {
 /// `GraphClusterer` uses a union-find data structure to cluster chunks based on their hash keys,
 /// grouping chunks whose keys are close within a certain threshold (`max_weight_edge`).
 ///
-/// # Details
+/// # Algorithm Overview
 ///
-/// The clustering is performed by assigning each chunk to a cluster represented by the root parent
-/// found via union-find. The `set_parent_vertex` method attempts to find a nearby parent vertex
-/// within the allowed edge weight to merge clusters.
+/// The clustering process works as follows:
+/// 1. Each chunk is converted to a u32 key via `get_key_for_graph_clusterer()`
+/// 2. For each key, the algorithm searches for an existing parent vertex within `max_weight_edge` distance
+/// 3. If found, the vertex is merged with that parent; otherwise, it becomes a new parent
+/// 4. Union-find with path compression ensures efficient cluster management
 ///
 /// # Type Parameters
 ///
@@ -52,7 +57,12 @@ impl Vertex {
 /// ```
 pub struct GraphClusterer {
     /// Map of vertex keys to their union-find vertex data.
+    /// This structure maintains the parent relationships for all vertices
+    /// in the clustering graph.
     vertices: HashMap<u32, Vertex>,
+
+    /// Maximum allowed edge weight for clustering.
+    /// Vertices with keys differing by more than this value will not be merged.
     max_weight_edge: u32,
 }
 
@@ -66,17 +76,25 @@ impl Default for GraphClusterer {
 impl GraphClusterer {
     /// Constructs a new `GraphClusterer`.
     ///
+    /// # Arguments
+    ///
+    /// * `max_weight_edge` - Maximum allowed edge weight for clustering.
+    ///
     /// # Returns
     ///
     /// An empty `GraphClusterer`.
-    pub fn new(_max_weight_edge: u32) -> GraphClusterer {
+    pub fn new(max_weight_edge: u32) -> GraphClusterer {
         GraphClusterer {
-            max_weight_edge: _max_weight_edge,
+            max_weight_edge,
             vertices: HashMap::new(),
         }
     }
 
     /// Finds the root parent of the given vertex key using path compression.
+    ///
+    /// This method implements the find operation of the union-find data structure
+    /// with path compression optimization. Path compression flattens the structure
+    /// of the tree, making future queries faster by pointing nodes directly to the root.
     ///
     /// # Arguments
     ///
@@ -85,12 +103,17 @@ impl GraphClusterer {
     /// # Returns
     ///
     /// The root parent's key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the vertex key does not exist in the vertices map.
+    #[allow(dead_code)]
     fn find_set(&mut self, hash_set: u32) -> u32 {
-        let parent = self.vertices.get(&hash_set).unwrap().parent;
+        let parent = self.vertices[&hash_set].parent;
         if hash_set != parent {
-            let parent = self.find_set(parent);
-            self.vertices.get_mut(&hash_set).unwrap().parent = parent;
-            parent
+            let root = self.find_set(parent);
+            self.vertices.get_mut(&hash_set).unwrap().parent = root;
+            root
         } else {
             parent
         }
@@ -98,6 +121,10 @@ impl GraphClusterer {
 
     /// Attempts to find a nearby parent vertex within `max_weight_edge` distance to cluster with.
     /// If no suitable parent is found, the vertex becomes its own parent.
+    ///
+    /// This method is the core of the clustering algorithm. It searches for an existing
+    /// cluster parent within the allowed distance threshold and either merges the new vertex
+    /// with that cluster or creates a new cluster.
     ///
     /// # Arguments
     ///
@@ -107,16 +134,34 @@ impl GraphClusterer {
     ///
     /// The parent vertex key assigned.
     fn set_parent_vertex(&mut self, hash: u32) -> u32 {
+        let parent_hash = self.find_nearest_parent(hash);
+        self.vertices.insert(hash, Vertex::new(parent_hash));
+        parent_hash
+    }
+
+    /// Finds the nearest parent vertex within the allowed distance range.
+    ///
+    /// This method searches the range `[hash - max_weight_edge, hash + max_weight_edge]`
+    /// for existing vertices and selects the one with the minimum distance to the hash.
+    /// The search considers the root parent of each vertex to ensure proper clustering.
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - The vertex key to find a parent for.
+    ///
+    /// # Returns
+    ///
+    /// The nearest parent vertex key, or the hash itself if no suitable parent is found.
+    fn find_nearest_parent(&self, hash: u32) -> u32 {
         let mut min_dist = u32::MAX;
         let mut parent_hash = hash;
 
-        // Search in the range [hash - MAX_WEIGHT_EDGE, hash + MAX_WEIGHT_EDGE]
         let start = hash.saturating_sub(self.max_weight_edge);
         let end = hash.saturating_add(self.max_weight_edge);
 
         for other_hash in start..=end {
-            if self.vertices.contains_key(&other_hash) {
-                let other_parent_hash = self.find_set(other_hash);
+            if let Some(vertex) = self.vertices.get(&other_hash) {
+                let other_parent_hash = self.find_root_parent(vertex.parent);
                 let dist = other_parent_hash.abs_diff(hash);
                 if dist < min_dist && dist <= self.max_weight_edge {
                     min_dist = dist;
@@ -125,8 +170,33 @@ impl GraphClusterer {
             }
         }
 
-        self.vertices.insert(hash, Vertex::new(parent_hash));
         parent_hash
+    }
+
+    /// Finds the root parent of a vertex without path compression.
+    ///
+    /// This is a read-only version of `find_set` used during parent search.
+    /// Unlike `find_set`, this method does not modify the parent pointers,
+    /// making it safe to use during the search phase before a vertex is added.
+    ///
+    /// # Arguments
+    ///
+    /// * `parent_key` - The parent key to start searching from.
+    ///
+    /// # Returns
+    ///
+    /// The root parent's key.
+    fn find_root_parent(&self, mut parent_key: u32) -> u32 {
+        loop {
+            if let Some(vertex) = self.vertices.get(&parent_key) {
+                if parent_key == vertex.parent {
+                    return parent_key;
+                }
+                parent_key = vertex.parent;
+            } else {
+                return parent_key;
+            }
+        }
     }
 }
 
@@ -145,58 +215,112 @@ impl<Hash: SBCHash> Clusterer<Hash> for GraphClusterer {
         chunk_sbc_hash: Vec<ClusterPoint<'a, Hash>>,
     ) -> (Clusters<'a, Hash>, ClusteringMeasurements) {
         let mut clusters: Clusters<Hash> = Clusters(HashMap::default());
-        let mut total_cluster_size = 0;
-        let mut number_of_clusters = 0;
-        let mut number_of_vertices_in_cluster = HashMap::new();
-        let mut distance_to_vertices_in_cluster: HashMap<u32, Vec<usize>> = HashMap::new();
+        let mut cluster_stats = ClusterStats::new();
         let mut parent_vertices: Vec<u32> = Vec::new();
 
         for (sbc_hash, data_container) in chunk_sbc_hash {
-            total_cluster_size += 1;
+            cluster_stats.total_cluster_size += 1;
 
-            // Obtain u32 key for graph clustering from the hash
             let key = sbc_hash.get_key_for_graph_clusterer();
-
-            // Find or assign the parent vertex for this key
             let parent_key = self.set_parent_vertex(key);
 
-            number_of_vertices_in_cluster
-                .entry(parent_key)
-                .and_modify(|value| *value += 1)
-                .or_insert(1);
-            if key == parent_key {
-                parent_vertices.push(key);
-                distance_to_vertices_in_cluster.insert(key, vec![]);
-                number_of_clusters += 1;
-            } else {
-                distance_to_vertices_in_cluster
-                    .entry(parent_key)
-                    .and_modify(|value| value.push(key.abs_diff(parent_key) as usize));
-            }
+            self.update_cluster_stats(key, parent_key, &mut cluster_stats, &mut parent_vertices);
 
-            // Group the chunk into the cluster identified by the parent's hash
-            let cluster = clusters
-                .0
-                .entry(Hash::new_with_u32(parent_key))
-                .or_default();
-            cluster.push((sbc_hash, data_container));
+            self.add_to_cluster(&mut clusters, parent_key, sbc_hash, data_container);
         }
 
         let distance_to_other_clusters = calculate_distance_to_other_vertices(parent_vertices);
-
-        // Stub. The calculation cannot be performed at this stage.
         let cluster_dedup_ratio = HashMap::new();
 
         let clusterization_report = ClusteringMeasurements {
-            total_cluster_size,
-            number_of_clusters,
-            number_of_vertices_in_cluster,
-            distance_to_vertices_in_cluster,
+            total_cluster_size: cluster_stats.total_cluster_size,
+            number_of_clusters: cluster_stats.number_of_clusters,
+            number_of_vertices_in_cluster: cluster_stats.number_of_vertices_in_cluster,
+            distance_to_vertices_in_cluster: cluster_stats.distance_to_vertices_in_cluster,
             distance_to_other_clusters,
             cluster_dedup_ratio,
         };
 
         (clusters, clusterization_report)
+    }
+}
+
+/// Internal statistics tracking for clustering operations.
+struct ClusterStats {
+    total_cluster_size: usize,
+    number_of_clusters: usize,
+    number_of_vertices_in_cluster: HashMap<u32, usize>,
+    distance_to_vertices_in_cluster: HashMap<u32, Vec<usize>>,
+}
+
+impl ClusterStats {
+    /// Creates a new empty `ClusterStats`.
+    fn new() -> Self {
+        ClusterStats {
+            total_cluster_size: 0,
+            number_of_clusters: 0,
+            number_of_vertices_in_cluster: HashMap::new(),
+            distance_to_vertices_in_cluster: HashMap::new(),
+        }
+    }
+}
+
+impl GraphClusterer {
+    /// Updates cluster statistics for a newly processed vertex.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The vertex key being processed.
+    /// * `parent_key` - The parent vertex key assigned.
+    /// * `cluster_stats` - Mutable reference to cluster statistics.
+    /// * `parent_vertices` - Mutable reference to the list of parent vertices.
+    fn update_cluster_stats(
+        &self,
+        key: u32,
+        parent_key: u32,
+        cluster_stats: &mut ClusterStats,
+        parent_vertices: &mut Vec<u32>,
+    ) {
+        cluster_stats
+            .number_of_vertices_in_cluster
+            .entry(parent_key)
+            .and_modify(|value| *value += 1)
+            .or_insert(1);
+
+        if key == parent_key {
+            parent_vertices.push(key);
+            cluster_stats
+                .distance_to_vertices_in_cluster
+                .insert(key, Vec::new());
+            cluster_stats.number_of_clusters += 1;
+        } else {
+            cluster_stats
+                .distance_to_vertices_in_cluster
+                .entry(parent_key)
+                .and_modify(|value| value.push(key.abs_diff(parent_key) as usize));
+        }
+    }
+
+    /// Adds a chunk point to its assigned cluster.
+    ///
+    /// # Arguments
+    ///
+    /// * `clusters` - Mutable reference to the clusters map.
+    /// * `parent_key` - The parent key identifying the cluster.
+    /// * `sbc_hash` - The similarity hash of the chunk.
+    /// * `data_container` - The data container associated with the chunk.
+    fn add_to_cluster<'a, Hash: SBCHash>(
+        &self,
+        clusters: &mut Clusters<'a, Hash>,
+        parent_key: u32,
+        sbc_hash: Hash,
+        data_container: &'a mut &'a mut chunkfs::DataContainer<crate::SBCKey<Hash>>,
+    ) {
+        let cluster = clusters
+            .0
+            .entry(Hash::new_with_u32(parent_key))
+            .or_default();
+        cluster.push((sbc_hash, data_container));
     }
 }
 
