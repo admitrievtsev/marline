@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::ClusterPoint;
+use crate::sbc_scrubber::ClusterPoint;
 use crate::decoder::Decoder;
 use crate::encoder::zdelta_comprassion_error::{
     DataConversionError, MatchEncodingError, StorageError,

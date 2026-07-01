@@ -1,14 +1,14 @@
 extern crate chunkfs;
-extern crate sbc_algorithm;
+extern crate marline_scrub;
 
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
-use sbc_algorithm::encoder::GdeltaEncoder;
-use sbc_algorithm::{clusterer, decoder, hasher};
-use sbc_algorithm::{SBCMap, SBCScrubber};
+use marline_scrub::encoder::GdeltaEncoder;
+use marline_scrub::{clusterer, decoder, hasher};
+use marline_scrub::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
-use std::io;
+use std::{fs, io};
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -22,8 +22,8 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    // ;) let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
-    let data = vec![0u8; 10 * 1024 * 1024];
+    let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
+    // let data = vec![0u8; 10 * 1024 * 1024];
     let num_iterations = 1;
     let mut measurements = Vec::new();
 
@@ -33,14 +33,14 @@ fn main() -> io::Result<()> {
         let total_start = Instant::now();
 
         // According to Odess sizes
-        let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
+        let chunk_size = SizeParams::new(16 * 1024, 32 * 1024, 64 * 1024);
 
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
                 hasher::OdessHasher::default(),
-                clusterer::EqClusterer::new(15),
+                clusterer::EqClusterer::new(6),
                 GdeltaEncoder::new(false),
             )),
             Sha256Hasher::default(),

@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::ClusterPoint;
+use crate::sbc_scrubber::ClusterPoint;
 use crate::decoder::Decoder;
 use crate::encoder::gdelta_encoder::GEAR;
 use crate::encoder::{
@@ -1087,13 +1087,13 @@ mod test {
 
     fn generate_test_data() -> Vec<u8> {
         const TEST_DATA_SIZE: usize = 8192;
-        (0..TEST_DATA_SIZE).map(|_| rand::random::<u8>()).collect()
+        (0..TEST_DATA_SIZE).map(|_| rng.random()).collect()
     }
 
     fn generate_test_data_deterministic(seed: u64) -> Vec<u8> {
         const TEST_DATA_SIZE: usize = 8192;
         let mut rng = StdRng::seed_from_u64(seed);
-        (0..TEST_DATA_SIZE).map(|_| rng.gen()).collect()
+        (0..TEST_DATA_SIZE).map(|_| rng.random()).collect()
     }
 
     fn create_map_and_key<'a>(

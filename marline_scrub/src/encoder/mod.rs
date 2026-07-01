@@ -6,7 +6,7 @@ pub mod zdelta_comprassion_error;
 pub mod zdelta_encoder;
 pub mod zdelta_match_pointers;
 
-use super::chunkfs_sbc::{ClusterPoint, Clusters};
+use super::sbc_scrubber::{ClusterPoint, Clusters};
 use crate::decoder::Decoder;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database, IterableDatabase};

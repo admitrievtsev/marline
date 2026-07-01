@@ -1,7 +1,7 @@
 mod eq_clusterer;
 mod graph_clusterer;
 
-use crate::chunkfs_sbc::{ClusterPoint, Clusters};
+use crate::sbc_scrubber::{ClusterPoint, Clusters};
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 pub use eq_clusterer::EqClusterer;

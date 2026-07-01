@@ -1,10 +1,10 @@
 [package]
-name = "runner"
+name = "marline"
 version = "0.1.0"
 edition = "2021"
 
 
 [dependencies]
-sbc_algorithm = { path = ".." }
+marline_scrub = { path = "../marline_scrub" }
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", features = ["chunkers", "hashers"]}
 csv = "1.3"

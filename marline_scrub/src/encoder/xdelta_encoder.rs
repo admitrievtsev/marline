@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::ClusterPoint;
+use crate::sbc_scrubber::ClusterPoint;
 use crate::decoder::Decoder;
 use crate::encoder::{
     count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
@@ -340,7 +340,7 @@ mod test {
     use crate::encoder::encode_simple_chunk;
     use crate::hasher::AronovichHash;
     use rand::prelude::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{Rng, RngExt, SeedableRng};
 
     const TEST_DATA_SIZE: usize = 8192;
 
@@ -713,7 +713,7 @@ mod test {
 
     fn generate_test_data_deterministic(seed: u64) -> Vec<u8> {
         let mut rng = StdRng::seed_from_u64(seed);
-        (0..TEST_DATA_SIZE).map(|_| rng.gen()).collect()
+        (0..TEST_DATA_SIZE).map(|_| rng.random()).collect()
     }
 
     fn create_map_and_key<'a>(

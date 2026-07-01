@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::{ClusterPoint, Clusters};
+use crate::sbc_scrubber::{ClusterPoint, Clusters};
 use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;

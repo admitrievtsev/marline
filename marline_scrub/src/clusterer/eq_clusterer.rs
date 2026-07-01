@@ -1,4 +1,4 @@
-use crate::chunkfs_sbc::{ClusterPoint, Clusters, EqCluster};
+use crate::sbc_scrubber::{ClusterPoint, Clusters, EqCluster};
 use crate::clusterer::Clusterer;
 use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;

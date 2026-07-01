@@ -1,9 +1,9 @@
 use crate::decoder::Decoder;
-pub use chunkfs_sbc::SBCScrubber;
+pub use sbc_scrubber::SBCScrubber;
 use hasher::SBCHash;
 use std::collections::HashMap;
 
-mod chunkfs_sbc;
+mod sbc_scrubber;
 pub mod clusterer;
 pub mod decoder;
 pub mod encoder;
