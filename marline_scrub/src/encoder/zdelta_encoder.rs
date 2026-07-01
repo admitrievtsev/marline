@@ -166,98 +166,99 @@ impl ZdeltaEncoder {
                     position_in_target_data,
                     parent_positions,
                     &pointers,
-                ) {
-                    if match_length < MIN_MATCH_LENGTH {
-                        self.encode_literal(
-                            target_data[position_in_target_data],
-                            &mut delta_code,
-                            &mut bit_vec_delta_code,
-                            &mut uncompressed_data,
-                        );
-                        position_in_target_data += 1;
-                        continue;
-                    }
-                    if let Some(book) = self.huffman_book() {
-                        match encode_match_huffman(
-                            match_length,
-                            offset,
-                            &pointer_type,
-                            book,
-                            target_data.len() - position_in_target_data,
-                        ) {
-                            Ok(encoded) => {
-                                bit_vec_delta_code.extend(&encoded);
-                            }
-                            Err(_) => {
-                                log::warn!(
-                                    "Invalid match length \
+                )
+            {
+                if match_length < MIN_MATCH_LENGTH {
+                    self.encode_literal(
+                        target_data[position_in_target_data],
+                        &mut delta_code,
+                        &mut bit_vec_delta_code,
+                        &mut uncompressed_data,
+                    );
+                    position_in_target_data += 1;
+                    continue;
+                }
+                if let Some(book) = self.huffman_book() {
+                    match encode_match_huffman(
+                        match_length,
+                        offset,
+                        &pointer_type,
+                        book,
+                        target_data.len() - position_in_target_data,
+                    ) {
+                        Ok(encoded) => {
+                            bit_vec_delta_code.extend(&encoded);
+                        }
+                        Err(_) => {
+                            log::warn!(
+                                "Invalid match length \
                                 (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
                                 falling back to literal encoding"
-                                );
+                            );
 
-                                for &byte in &target_data[position_in_target_data
-                                    ..position_in_target_data + match_length]
-                                {
-                                    self.encode_literal(
-                                        byte,
-                                        &mut delta_code,
-                                        &mut bit_vec_delta_code,
-                                        &mut uncompressed_data,
+                            for &byte in &target_data
+                                [position_in_target_data..position_in_target_data + match_length]
+                            {
+                                self.encode_literal(
+                                    byte,
+                                    &mut delta_code,
+                                    &mut bit_vec_delta_code,
+                                    &mut uncompressed_data,
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    match encode_match_raw(
+                        match_length,
+                        offset,
+                        &pointer_type,
+                        target_data.len() - position_in_target_data,
+                    ) {
+                        Ok(encoded) => delta_code.extend_from_slice(&encoded),
+                        Err(e) => {
+                            match e {
+                                MatchEncodingError::InvalidLength(..) => {
+                                    log::warn!(
+                                        "Invalid match length \
+                                        (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
+                                        falling back to literal encoding"
+                                    );
+                                }
+                                MatchEncodingError::InvalidParameterCombination => {
+                                    log::error!(
+                                        "Invalid parameter combination \
+                                        (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})"
                                     );
                                 }
                             }
-                        }
-                    } else {
-                        match encode_match_raw(
-                            match_length,
-                            offset,
-                            &pointer_type,
-                            target_data.len() - position_in_target_data,
-                        ) {
-                            Ok(encoded) => delta_code.extend_from_slice(&encoded),
-                            Err(e) => {
-                                match e {
-                                    MatchEncodingError::InvalidLength(..) => {
-                                        log::warn!(
-                                            "Invalid match length \
-                                        (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
-                                        falling back to literal encoding"
-                                        );
-                                    }
-                                    MatchEncodingError::InvalidParameterCombination => {
-                                        log::error!(
-                                            "Invalid parameter combination \
-                                        (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})"
-                                        );
-                                    }
-                                }
-                                for &byte in &target_data[position_in_target_data
-                                    ..position_in_target_data + match_length]
-                                {
-                                    delta_code.push(byte);
-                                    uncompressed_data += 1;
-                                }
+                            for &byte in &target_data
+                                [position_in_target_data..position_in_target_data + match_length]
+                            {
+                                delta_code.push(byte);
+                                uncompressed_data += 1;
                             }
                         }
                     }
-
-                    let reference_match_end = match pointer_type {
-                        ReferencePointerType::TargetLocal => position_in_target_data + match_length,
-                        _ => {
-                            let base_ptr = pointers.get(&pointer_type);
-                            (base_ptr as isize + offset as isize + match_length as isize) as usize
-                        }
-                    };
-                    pointers.smart_update_after_match(
-                        reference_match_end,
-                        offset,
-                        pointer_type,
-                        previous_match_offset,
-                    );
-                    previous_match_offset = Some(offset);
-                    position_in_target_data += match_length;
-                    continue;
                 }
+
+                let reference_match_end = match pointer_type {
+                    ReferencePointerType::TargetLocal => position_in_target_data + match_length,
+                    _ => {
+                        let base_ptr = pointers.get(&pointer_type);
+                        (base_ptr as isize + offset as isize + match_length as isize) as usize
+                    }
+                };
+                pointers.smart_update_after_match(
+                    reference_match_end,
+                    offset,
+                    pointer_type,
+                    previous_match_offset,
+                );
+                previous_match_offset = Some(offset);
+                position_in_target_data += match_length;
+                continue;
+            }
 
             self.encode_literal(
                 target_data[position_in_target_data],
