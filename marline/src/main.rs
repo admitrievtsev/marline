@@ -8,8 +8,8 @@ use marline_scrub::encoder::GdeltaEncoder;
 use marline_scrub::{clusterer, decoder, hasher};
 use marline_scrub::{SBCMap, SBCScrubber};
 use std::collections::HashMap;
-use std::{fs, io};
 use std::time::Instant;
+use std::{fs, io};
 
 #[derive(Debug)]
 struct Measurement {

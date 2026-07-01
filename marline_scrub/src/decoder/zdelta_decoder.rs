@@ -161,7 +161,9 @@ impl Decoder for ZdeltaDecoder {
                 + (length_coefficient as usize * LENGTH_BLOCK_SIZE);
 
             if match_length > MAX_MATCH_LENGTH {
-                log::error!("Match length {match_length} exceeds MAX_MATCH_LENGTH at index {index_in_data_to_decode}");
+                log::error!(
+                    "Match length {match_length} exceeds MAX_MATCH_LENGTH at index {index_in_data_to_decode}"
+                );
                 index_in_data_to_decode += 1;
                 continue;
             }

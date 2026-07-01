@@ -7,8 +7,8 @@ use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
-use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io;
 use std::io::{Error, ErrorKind};

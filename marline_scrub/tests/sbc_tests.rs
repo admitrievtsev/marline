@@ -2,12 +2,12 @@
 mod test {
     extern crate chunkfs;
     extern crate sbc_algorithm;
+    use chunkfs::FileSystem;
     use chunkfs::chunkers::SuperChunker;
     use chunkfs::hashers::Sha256Hasher;
-    use chunkfs::FileSystem;
     use sbc_algorithm::decoder::{GdeltaDecoder, LevenshteinDecoder};
     use sbc_algorithm::encoder::{GdeltaEncoder, LevenshteinEncoder};
-    use sbc_algorithm::{clusterer, hasher, SBCMap, SBCScrubber};
+    use sbc_algorithm::{SBCMap, SBCScrubber, clusterer, hasher};
     use std::collections::HashMap;
 
     #[test]

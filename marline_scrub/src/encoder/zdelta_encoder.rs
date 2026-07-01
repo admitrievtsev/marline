@@ -1,11 +1,11 @@
-use crate::sbc_scrubber::ClusterPoint;
 use crate::decoder::Decoder;
 use crate::encoder::zdelta_comprassion_error::{
     DataConversionError, MatchEncodingError, StorageError,
 };
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
+use crate::encoder::{Encoder, count_delta_chunks_with_hash, get_parent_data};
 use crate::hasher::SBCHash;
+use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCKey, SBCMap};
 use bit_vec::BitVec;
 use chunkfs::{Data, Database};
@@ -226,8 +226,9 @@ impl ZdeltaEncoder {
                                     }
                                     MatchEncodingError::InvalidParameterCombination => {
                                         log::error!(
-                                        "Invalid parameter combination \
-                                        (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})");
+                                            "Invalid parameter combination \
+                                        (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})"
+                                        );
                                     }
                                 }
                                 for &byte in &target_data[position_in_target_data
@@ -963,8 +964,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals(
-    ) {
+    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals()
+     {
         let (book, _) = create_default_huffman_book_and_tree();
 
         let ascii_len = encode_to_bits(&book, 65).len();

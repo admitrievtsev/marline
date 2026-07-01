@@ -243,8 +243,8 @@ mod tests {
     }
 
     #[test]
-    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr(
-    ) {
+    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr()
+     {
         let pointers = MatchPointers::new(100, 200, 300);
         let (offset, pointer_type) = pointers.calculate_offset(50);
         assert_eq!(offset, -50);

@@ -1,5 +1,5 @@
-use crate::hasher::SBCHasher;
 use crate::SBCHash;
+use crate::hasher::SBCHasher;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;
@@ -181,10 +181,10 @@ fn processing_of_p_spectrum(pair_value_pair_frequency: HashMap<(u8, u8), u32>) -
     p_spectrum.sort_by(|a, b| {
         if b.1 != a.1 {
             b.1.cmp(a.1)
-        } else if a.0 .0 != b.0 .0 {
-            a.0 .0.cmp(&b.0 .0)
+        } else if a.0.0 != b.0.0 {
+            a.0.0.cmp(&b.0.0)
         } else {
-            a.0 .1.cmp(&b.0 .1)
+            a.0.1.cmp(&b.0.1)
         }
     });
     let mut hash: u32 = 0;

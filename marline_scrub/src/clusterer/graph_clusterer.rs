@@ -1,6 +1,6 @@
-use crate::sbc_scrubber::{ClusterPoint, Clusters};
-use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
 use crate::SBCHash;
+use crate::clusterer::{Clusterer, calculate_distance_to_other_vertices};
+use crate::sbc_scrubber::{ClusterPoint, Clusters};
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 
@@ -327,7 +327,7 @@ impl GraphClusterer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{decoder, encoder, hasher, SBCMap, SBCScrubber};
+    use crate::{SBCMap, SBCScrubber, decoder, encoder, hasher};
     use chunkfs::chunkers::{SizeParams, SuperChunker};
     use chunkfs::hashers::Sha256Hasher;
     use chunkfs::{FileSystem, ScrubMeasurements};
@@ -367,15 +367,19 @@ mod tests {
         let cluster_report = &scrub_report.clusterization_report;
         assert!(cluster_report.total_cluster_size > 0);
         assert!(cluster_report.number_of_clusters > 0);
-        assert!(cluster_report
-            .number_of_vertices_in_cluster
-            .values()
-            .all(|&v| v >= 1));
+        assert!(
+            cluster_report
+                .number_of_vertices_in_cluster
+                .values()
+                .all(|&v| v >= 1)
+        );
         assert!(!cluster_report.distance_to_vertices_in_cluster.is_empty());
-        assert!(cluster_report
-            .distance_to_other_clusters
-            .values()
-            .all(|v| !v.is_empty()));
+        assert!(
+            cluster_report
+                .distance_to_other_clusters
+                .values()
+                .all(|v| !v.is_empty())
+        );
     }
 
     #[test]

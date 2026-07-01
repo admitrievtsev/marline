@@ -1,6 +1,6 @@
-use crate::sbc_scrubber::{ClusterPoint, Clusters, EqCluster};
-use crate::clusterer::Clusterer;
 use crate::SBCHash;
+use crate::clusterer::Clusterer;
+use crate::sbc_scrubber::{ClusterPoint, Clusters, EqCluster};
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 

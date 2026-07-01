@@ -1,6 +1,6 @@
-use crate::sbc_scrubber::ClusterPoint;
 use crate::decoder::Decoder;
-use crate::encoder::{count_delta_chunks_with_hash, encode_simple_chunk, get_parent_data, Encoder};
+use crate::encoder::{Encoder, count_delta_chunks_with_hash, encode_simple_chunk, get_parent_data};
+use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database};
 use std::cmp::min;
