@@ -159,8 +159,8 @@ impl ZdeltaEncoder {
             );
             let hash = compute_triplet_hash(&triplet);
 
-            if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
-                if let Some((match_length, offset, pointer_type)) = select_best_match(
+            if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash)
+                && let Some((match_length, offset, pointer_type)) = select_best_match(
                     target_data,
                     parent_data,
                     position_in_target_data,
@@ -258,7 +258,6 @@ impl ZdeltaEncoder {
                     position_in_target_data += match_length;
                     continue;
                 }
-            }
 
             self.encode_literal(
                 target_data[position_in_target_data],
