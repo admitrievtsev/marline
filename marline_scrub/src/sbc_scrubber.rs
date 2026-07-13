@@ -1,8 +1,8 @@
 use crate::clusterer::Clusterer;
 use crate::decoder::Decoder;
 use crate::encoder::Encoder;
-use crate::hasher::SBCHasher;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
+use marline_sketcher::SBCHasher;
 
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,

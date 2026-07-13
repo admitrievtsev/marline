@@ -1,10 +1,10 @@
+use crate::SBCHash;
 use crate::decoder::Decoder;
 use crate::encoder::gdelta_encoder::GEAR;
 use crate::encoder::{
     Encoder, count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
     get_parent_data,
 };
-use crate::hasher::SBCHash;
 use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCKey, SBCMap};
 use chunkfs::{Data, Database};

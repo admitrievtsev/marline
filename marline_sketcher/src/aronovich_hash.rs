@@ -1,5 +1,5 @@
 use crate::SBCHash;
-use crate::hasher::SBCHasher;
+use crate::SBCHasher;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;

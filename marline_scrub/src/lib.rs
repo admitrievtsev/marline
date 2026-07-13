@@ -1,12 +1,11 @@
 use crate::decoder::Decoder;
-use hasher::SBCHash;
+use marline_sketcher::SBCHash;
 pub use sbc_scrubber::SBCScrubber;
 use std::collections::HashMap;
 
 pub mod clusterer;
 pub mod decoder;
 pub mod encoder;
-pub mod hasher;
 mod sbc_scrubber;
 
 /// Represents the type of a chunk stored in the filesystem.

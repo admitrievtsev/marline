@@ -6,5 +6,7 @@ edition = "2021"
 
 [dependencies]
 marline_scrub = { path = "../marline_scrub" }
+
+marline_sketcher = { path = "../marline_sketcher" }
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", features = ["chunkers", "hashers"]}
 csv = "1.3"

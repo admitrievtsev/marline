@@ -1,6 +1,6 @@
-use crate::encoder::GEAR;
-use crate::hasher::odess_hasher::IndexType::SuperFeatured;
-use crate::hasher::{SBCHash, SBCHasher};
+use crate::GEAR;
+use crate::odess_hasher::IndexType::SuperFeatured;
+use crate::{SBCHash, SBCHasher};
 use rand;
 use std::hash::{DefaultHasher, Hash, Hasher};
 

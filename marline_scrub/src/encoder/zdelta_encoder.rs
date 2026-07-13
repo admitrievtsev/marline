@@ -1,10 +1,10 @@
+use crate::SBCHash;
 use crate::decoder::Decoder;
 use crate::encoder::zdelta_comprassion_error::{
     DataConversionError, MatchEncodingError, StorageError,
 };
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
 use crate::encoder::{Encoder, count_delta_chunks_with_hash, get_parent_data};
-use crate::hasher::SBCHash;
 use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCKey, SBCMap};
 use bit_vec::BitVec;
