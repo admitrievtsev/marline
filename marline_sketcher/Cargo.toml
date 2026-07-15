@@ -1,0 +1,16 @@
+[package]
+name = "marline_sketcher"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+marline_delta = { path = "../marline_delta" }
+rand = "0.10.1"
+rayon = "1.10"
+zstd = "0.13"
+thiserror = "2.0.12"
+huffman-compress = "0.6.1"
+bit-vec = "0.6.3"
+log = "0.4.27"
+fasthash = "0.4.0"

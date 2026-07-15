@@ -1,6 +1,6 @@
-use crate::encoder::GEAR;
-use crate::hasher::odess_hasher::IndexType::SuperFeatured;
-use crate::hasher::{SBCHash, SBCHasher};
+use crate::GEAR;
+use crate::odess_hasher::IndexType::SuperFeatured;
+use crate::{SBCHash, SBCHasher};
 use rand;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -61,7 +61,7 @@ pub enum IndexType {
     /// # Ejemplo
     ///
     /// ```
-    /// use sbc_algorithm::hasher::odess_hasher::{IndexType, SuperFeatureConfig};
+    /// use marline_sketcher::odess_hasher::{IndexType, SuperFeatureConfig};
     ///
     /// let config = SuperFeatureConfig::new(2, 6);
     /// let index_type = IndexType::SuperFeatured(config);
@@ -164,10 +164,9 @@ impl SBCHasher for OdessHasher {
             // Content-defined sampling
             if fp & mask == 0 {
                 for (i, feature) in features.iter_mut().enumerate().take(self.features_num) {
-                    let transform = self.linear_coefficients[i]
-                        .wrapping_mul(fp)
-                        .wrapping_add(byte as u64)
-                        % (1u64 << 32);
+                    let transform =
+                        self.linear_coefficients[i].wrapping_mul(fp).wrapping_add(byte as u64)
+                            % (1u64 << 32);
                     if *feature > transform {
                         *feature = transform;
                     }
@@ -199,13 +198,9 @@ impl SBCHasher for OdessHasher {
                     }
                 }
 
-                OdessHash {
-                    hash: super_features,
-                }
+                OdessHash { hash: super_features }
             }
-            IndexType::RawFeatured(_) => OdessHash {
-                hash: features.to_vec(),
-            },
+            IndexType::RawFeatured(_) => OdessHash { hash: features.to_vec() },
         }
     }
 }
@@ -231,11 +226,6 @@ impl OdessHasher {
             linear_coefficients.push(rand::random::<u64>());
         }
 
-        OdessHasher {
-            sampling_rate,
-            linear_coefficients,
-            index_type,
-            features_num,
-        }
+        OdessHasher { sampling_rate, linear_coefficients, index_type, features_num }
     }
 }

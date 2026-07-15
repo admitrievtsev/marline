@@ -25,11 +25,7 @@ pub struct MatchPointers {
 impl MatchPointers {
     /// Creates new MatchPointers with specified initial positions.
     pub fn new(target_ptr: usize, main_ref_ptr: usize, auxiliary_ref_ptr: usize) -> Self {
-        MatchPointers {
-            target_ptr,
-            main_ref_ptr,
-            auxiliary_ref_ptr,
-        }
+        MatchPointers { target_ptr, main_ref_ptr, auxiliary_ref_ptr }
     }
 
     pub fn get(&self, pointer: &ReferencePointerType) -> usize {
@@ -243,8 +239,8 @@ mod tests {
     }
 
     #[test]
-    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr()
-     {
+    fn calculate_offset_should_return_target_local_with_negative_offset_when_position_before_target_ptr(
+    ) {
         let pointers = MatchPointers::new(100, 200, 300);
         let (offset, pointer_type) = pointers.calculate_offset(50);
         assert_eq!(offset, -50);

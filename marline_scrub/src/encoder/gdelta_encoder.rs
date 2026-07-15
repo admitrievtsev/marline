@@ -1,5 +1,5 @@
 use crate::decoder::Decoder;
-use crate::encoder::{Encoder, count_delta_chunks_with_hash, get_parent_data};
+use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
 use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::Data;
@@ -100,10 +100,7 @@ impl GdeltaEncoder {
         let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
         let sbc_hash = SBCKey {
             hash,
-            chunk_type: ChunkType::Delta {
-                parent_hash,
-                number: number_delta_chunk,
-            },
+            chunk_type: ChunkType::Delta { parent_hash, number: number_delta_chunk },
         };
         if self.zstd_flag {
             delta_code = stream::encode_all(delta_code.as_slice(), 0).unwrap();

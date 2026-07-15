@@ -1,5 +1,5 @@
 use crate::decoder::Decoder;
-use crate::encoder::{Encoder, count_delta_chunks_with_hash, encode_simple_chunk, get_parent_data};
+use crate::encoder::{count_delta_chunks_with_hash, encode_simple_chunk, get_parent_data, Encoder};
 use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database};
@@ -64,10 +64,7 @@ impl LevenshteinEncoder {
                 let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
                 let sbc_hash = SBCKey {
                     hash,
-                    chunk_type: ChunkType::Delta {
-                        parent_hash,
-                        number: number_delta_chunk,
-                    },
+                    chunk_type: ChunkType::Delta { parent_hash, number: number_delta_chunk },
                 };
                 let _ = target_map_lock.insert(sbc_hash.clone(), delta_chunk);
                 (0, processed_data, sbc_hash)
@@ -184,11 +181,7 @@ fn encode(data_chunk: &[u8], data_chunk_parent: &[u8]) -> Option<Vec<u32>> {
             x -= 1;
             y -= 1;
         } else if y > 0 && matrix[y - 1][x] < matrix[y][x] {
-            delta_code.push(encode_delta_action(
-                Action::Del,
-                id_non_eq_byte_start + y - 1,
-                0,
-            ));
+            delta_code.push(encode_delta_action(Action::Del, id_non_eq_byte_start + y - 1, 0));
             y -= 1;
         } else if x > 0 && matrix[y][x - 1] < matrix[y][x] {
             delta_code.push(encode_delta_action(
@@ -263,7 +256,7 @@ fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
 mod test {
     use super::*;
     use crate::decoder;
-    use crate::hasher::AronovichHash;
+    use marline_sketcher::AronovichHash;
 
     #[test]
     fn test_restore_similarity_chunk_1_byte_diff() {
@@ -363,10 +356,7 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -381,28 +371,19 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
     fn create_map_and_key<'a>(
         data: &'a [u8],
         data2: &'a [u8],
-    ) -> (
-        SBCMap<decoder::LevenshteinDecoder, AronovichHash>,
-        SBCKey<AronovichHash>,
-    ) {
+    ) -> (SBCMap<decoder::LevenshteinDecoder, AronovichHash>, SBCKey<AronovichHash>) {
         let mut binding = SBCMap::new(decoder::LevenshteinDecoder::default());
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) = encode_simple_chunk(
-            &mut sbc_map.lock().unwrap(),
-            data,
-            AronovichHash::new_with_u32(0),
-        );
+        let (_, sbc_key) =
+            encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new_with_u32(0));
         let (_, _, sbc_key_2) = LevenshteinEncoder::default().encode_delta_chunk(
             sbc_map.clone(),
             data2,

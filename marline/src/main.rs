@@ -5,11 +5,12 @@ use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
 use marline_scrub::encoder::GdeltaEncoder;
-use marline_scrub::{clusterer, decoder, hasher};
+use marline_scrub::{clusterer, decoder};
 use marline_scrub::{SBCMap, SBCScrubber};
+use marline_sketcher::OdessHasher;
 use std::collections::HashMap;
+use std::io;
 use std::time::Instant;
-use std::{fs, io};
 
 #[derive(Debug)]
 struct Measurement {
@@ -22,8 +23,8 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
-    // let data = vec![0u8; 10 * 1024 * 1024];
+    // let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
+    let data = vec![0u8; 10 * 1024 * 1024];
     let num_iterations = 1;
     let mut measurements = Vec::new();
 
@@ -39,7 +40,7 @@ fn main() -> io::Result<()> {
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
-                hasher::OdessHasher::default(),
+                OdessHasher::default(),
                 clusterer::EqClusterer::new(6),
                 GdeltaEncoder::new(false),
             )),

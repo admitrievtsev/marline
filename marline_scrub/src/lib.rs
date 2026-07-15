@@ -1,12 +1,11 @@
 use crate::decoder::Decoder;
-use hasher::SBCHash;
+use marline_sketcher::SBCHash;
 pub use sbc_scrubber::SBCScrubber;
 use std::collections::HashMap;
 
 pub mod clusterer;
 pub mod decoder;
 pub mod encoder;
-pub mod hasher;
 mod sbc_scrubber;
 
 /// Represents the type of a chunk stored in the filesystem.
@@ -72,9 +71,9 @@ pub struct SBCKey<H: SBCHash> {
 /// # Example
 ///
 /// ```
-/// use sbc_algorithm::decoder::LevenshteinDecoder;
-/// use sbc_algorithm::hasher::AronovichHash;
-/// use sbc_algorithm::SBCMap;
+/// use marline_scrub::decoder::LevenshteinDecoder;
+/// use marline_sketcher::AronovichHash;
+/// use marline_scrub::SBCMap;
 ///
 /// let mut map: SBCMap<LevenshteinDecoder, AronovichHash> = SBCMap::new(LevenshteinDecoder::default());
 /// ```
@@ -97,9 +96,6 @@ impl<D: Decoder, H: SBCHash> SBCMap<D, H> {
     ///
     /// A new `SBCMap` ready to store chunks and decode them on demand.
     pub fn new(decoder: D) -> Self {
-        SBCMap {
-            sbc_hashmap: HashMap::new(),
-            decoder,
-        }
+        SBCMap { sbc_hashmap: HashMap::new(), decoder }
     }
 }

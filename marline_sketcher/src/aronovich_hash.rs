@@ -1,5 +1,5 @@
 use crate::SBCHash;
-use crate::hasher::SBCHasher;
+use crate::SBCHasher;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;
@@ -48,15 +48,11 @@ impl SBCHash for AronovichHash {
         AronovichHash { hash }
     }
     fn next_hash(&self) -> Self {
-        AronovichHash {
-            hash: self.hash.saturating_add(1),
-        }
+        AronovichHash { hash: self.hash.saturating_add(1) }
     }
 
     fn last_hash(&self) -> Self {
-        AronovichHash {
-            hash: self.hash.saturating_sub(1),
-        }
+        AronovichHash { hash: self.hash.saturating_sub(1) }
     }
 
     fn get_key_for_graph_clusterer(&self) -> u32 {
@@ -81,9 +77,7 @@ impl SBCHasher for AronovichHasher {
             let byte_count = byte_value_byte_frequency.entry(*byte).or_insert(0);
             *byte_count += 1;
 
-            let pair_count = pair_value_pair_frequency
-                .entry((last_byte, *byte))
-                .or_insert(0u32);
+            let pair_count = pair_value_pair_frequency.entry((last_byte, *byte)).or_insert(0u32);
             *pair_count += 1;
             last_byte = *byte;
         }
@@ -105,19 +99,13 @@ fn processing_of_c_spectrum(c_f_spectrum: &[(&u8, &u32)]) -> u32 {
             spaces_in_c_spectrum.push((byte_index, frequency_delta));
         }
     }
-    spaces_in_c_spectrum.sort_by(|a, b| {
-        if b.1 != a.1 {
-            b.1.cmp(&a.1)
-        } else {
-            a.0.cmp(&b.0)
-        }
-    });
+    spaces_in_c_spectrum.sort_by(|a, b| if b.1 != a.1 { b.1.cmp(&a.1) } else { a.0.cmp(&b.0) });
 
     let mut spaces_in_c_spectrum_indexes = Vec::new();
-    for space in spaces_in_c_spectrum.iter().take(std::cmp::min(
-        spaces_in_c_spectrum.len(),
-        BLOCKS_IN_C_SPECTRUM_COUNT,
-    )) {
+    for space in spaces_in_c_spectrum
+        .iter()
+        .take(std::cmp::min(spaces_in_c_spectrum.len(), BLOCKS_IN_C_SPECTRUM_COUNT))
+    {
         spaces_in_c_spectrum_indexes.push(space.0);
     }
     spaces_in_c_spectrum_indexes.sort();
@@ -200,13 +188,7 @@ fn processing_of_p_spectrum(pair_value_pair_frequency: HashMap<(u8, u8), u32>) -
 
 fn processing_of_c_f_spectrum(byte_value_byte_frequency: HashMap<u8, u32>) -> u32 {
     let mut c_f_spectrum: Vec<(&u8, &u32)> = byte_value_byte_frequency.iter().collect();
-    c_f_spectrum.sort_by(|a, b| {
-        if b.1 != a.1 {
-            b.1.cmp(a.1)
-        } else {
-            a.0.cmp(b.0)
-        }
-    });
+    c_f_spectrum.sort_by(|a, b| if b.1 != a.1 { b.1.cmp(a.1) } else { a.0.cmp(b.0) });
     let c_hash = processing_of_c_spectrum(c_f_spectrum.as_slice());
     let f_hash = processing_of_f_spectrum(c_f_spectrum.as_slice());
     c_hash ^ f_hash
@@ -261,9 +243,7 @@ mod test {
         let mut pair_value_pair_frequency = HashMap::new();
         let mut last_byte = data[0];
         for byte in &data[1..] {
-            let pair_count = pair_value_pair_frequency
-                .entry((last_byte, *byte))
-                .or_insert(0u32);
+            let pair_count = pair_value_pair_frequency.entry((last_byte, *byte)).or_insert(0u32);
             *pair_count += 1;
             last_byte = *byte;
         }

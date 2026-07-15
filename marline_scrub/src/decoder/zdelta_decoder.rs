@@ -32,9 +32,7 @@ impl ZdeltaDecoder {
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
             let (_, huffman_tree) = zdelta_encoder::create_default_huffman_book_and_tree();
-            Self {
-                huffman_tree: Some(huffman_tree),
-            }
+            Self { huffman_tree: Some(huffman_tree) }
         } else {
             Self { huffman_tree: None }
         }
@@ -229,9 +227,7 @@ fn process_match(
         }
     };
 
-    let end_position = source_position
-        .checked_add(length)
-        .ok_or(DecodeError::Length)?;
+    let end_position = source_position.checked_add(length).ok_or(DecodeError::Length)?;
 
     match pointer_type {
         ReferencePointerType::TargetLocal => {
@@ -439,33 +435,14 @@ mod tests {
         let mut output = vec![b'a', b'b', b'c'];
         let parent_data = vec![];
 
-        process_match(
-            3,
-            -3,
-            TargetLocal,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        )
-        .unwrap();
+        process_match(3, -3, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None)
+            .unwrap();
         assert_eq!(output, vec![b'a', b'b', b'c', b'a', b'b', b'c']);
         assert_eq!(pointers.get(&TargetLocal), 3);
 
-        process_match(
-            3,
-            -3,
-            TargetLocal,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        )
-        .unwrap();
-        assert_eq!(
-            output,
-            vec![b'a', b'b', b'c', b'a', b'b', b'c', b'a', b'b', b'c']
-        );
+        process_match(3, -3, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None)
+            .unwrap();
+        assert_eq!(output, vec![b'a', b'b', b'c', b'a', b'b', b'c', b'a', b'b', b'c']);
         assert_eq!(pointers.get(&TargetLocal), 6);
     }
 
@@ -496,16 +473,8 @@ mod tests {
         let mut output = Vec::new();
         let parent_data = vec![b'a', b'b', b'c', b'd', b'e'];
 
-        process_match(
-            2,
-            -1,
-            Auxiliary,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        )
-        .unwrap();
+        process_match(2, -1, Auxiliary, &parent_data, &mut pointers, &mut output, &mut None)
+            .unwrap();
 
         assert_eq!(output, vec![b'a', b'b']);
         assert_eq!(pointers.get(&Auxiliary), 2);
@@ -517,15 +486,8 @@ mod tests {
         let mut output = vec![b'a', b'b'];
         let parent_data = Vec::new();
 
-        let result = process_match(
-            1,
-            -3,
-            TargetLocal,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        );
+        let result =
+            process_match(1, -3, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None);
 
         assert!(matches!(result, Err(DecodeError::Offset)));
     }
@@ -536,15 +498,8 @@ mod tests {
         let mut output = vec![b'a', b'b'];
         let parent_data = Vec::new();
 
-        let result = process_match(
-            1,
-            1,
-            TargetLocal,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        );
+        let result =
+            process_match(1, 1, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None);
 
         assert!(matches!(result, Err(DecodeError::Offset)));
     }
@@ -627,16 +582,8 @@ mod tests {
         )
         .unwrap();
 
-        process_match(
-            2,
-            -2,
-            TargetLocal,
-            &parent_data,
-            &mut pointers,
-            &mut output,
-            &mut None,
-        )
-        .unwrap();
+        process_match(2, -2, TargetLocal, &parent_data, &mut pointers, &mut output, &mut None)
+            .unwrap();
 
         assert_eq!(output, vec![b'a', b'b', b'a', b'b']);
         assert_eq!(pointers.get(&TargetLocal), 2);
@@ -880,10 +827,7 @@ mod tests {
         let encoded = buffer.to_bytes();
         let decoded = decoder.huffman_to_raw(&encoded);
 
-        assert_eq!(
-            decoded,
-            vec![LITERAL_FLAG, b'A', 2, 10, 0, 100, LITERAL_FLAG, b'B']
-        );
+        assert_eq!(decoded, vec![LITERAL_FLAG, b'A', 2, 10, 0, 100, LITERAL_FLAG, b'B']);
     }
 
     #[test]
@@ -918,8 +862,6 @@ mod tests {
         }
         let (_, tree) = CodeBuilder::from_iter(frequencies).finish();
 
-        ZdeltaDecoder {
-            huffman_tree: Some(tree),
-        }
+        ZdeltaDecoder { huffman_tree: Some(tree) }
     }
 }

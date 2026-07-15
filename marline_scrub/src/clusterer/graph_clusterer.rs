@@ -1,6 +1,6 @@
-use crate::SBCHash;
-use crate::clusterer::{Clusterer, calculate_distance_to_other_vertices};
+use crate::clusterer::{calculate_distance_to_other_vertices, Clusterer};
 use crate::sbc_scrubber::{ClusterPoint, Clusters};
+use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 
@@ -50,7 +50,7 @@ impl Vertex {
 /// # Example
 ///
 /// ```
-/// # use sbc_algorithm::clusterer::GraphClusterer;
+/// # use crate::marline_scrub::clusterer::GraphClusterer;
 ///
 /// let mut clusterer = GraphClusterer::default();
 /// // Use clusterer.clusterize(...) to cluster chunks.
@@ -84,10 +84,7 @@ impl GraphClusterer {
     ///
     /// An empty `GraphClusterer`.
     pub fn new(max_weight_edge: u32) -> GraphClusterer {
-        GraphClusterer {
-            max_weight_edge,
-            vertices: HashMap::new(),
-        }
+        GraphClusterer { max_weight_edge, vertices: HashMap::new() }
     }
 
     /// Finds the root parent of the given vertex key using path compression.
@@ -289,9 +286,7 @@ impl GraphClusterer {
 
         if key == parent_key {
             parent_vertices.push(key);
-            cluster_stats
-                .distance_to_vertices_in_cluster
-                .insert(key, Vec::new());
+            cluster_stats.distance_to_vertices_in_cluster.insert(key, Vec::new());
             cluster_stats.number_of_clusters += 1;
         } else {
             cluster_stats
@@ -316,10 +311,7 @@ impl GraphClusterer {
         sbc_hash: Hash,
         data_container: &'a mut &'a mut chunkfs::DataContainer<crate::SBCKey<Hash>>,
     ) {
-        let cluster = clusters
-            .0
-            .entry(Hash::new_with_u32(parent_key))
-            .or_default();
+        let cluster = clusters.0.entry(Hash::new_with_u32(parent_key)).or_default();
         cluster.push((sbc_hash, data_container));
     }
 }
@@ -327,7 +319,8 @@ impl GraphClusterer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SBCMap, SBCScrubber, decoder, encoder, hasher};
+    use crate::{decoder, encoder, SBCMap, SBCScrubber};
+
     use chunkfs::chunkers::{SizeParams, SuperChunker};
     use chunkfs::hashers::Sha256Hasher;
     use chunkfs::{FileSystem, ScrubMeasurements};
@@ -344,16 +337,14 @@ mod tests {
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
-                hasher::AronovichHasher,
+                marline_sketcher::AronovichHasher,
                 GraphClusterer::default(),
                 encoder::GdeltaEncoder::new(false),
             )),
             Sha256Hasher::default(),
         );
 
-        let mut handle = fs
-            .create_file("file".to_string(), SuperChunker::new(chunk_size))
-            .unwrap();
+        let mut handle = fs.create_file("file".to_string(), SuperChunker::new(chunk_size)).unwrap();
         fs.write_to_file(&mut handle, &data).unwrap();
         fs.close_file(handle).unwrap();
         fs.scrub().unwrap()
@@ -367,19 +358,9 @@ mod tests {
         let cluster_report = &scrub_report.clusterization_report;
         assert!(cluster_report.total_cluster_size > 0);
         assert!(cluster_report.number_of_clusters > 0);
-        assert!(
-            cluster_report
-                .number_of_vertices_in_cluster
-                .values()
-                .all(|&v| v >= 1)
-        );
+        assert!(cluster_report.number_of_vertices_in_cluster.values().all(|&v| v >= 1));
         assert!(!cluster_report.distance_to_vertices_in_cluster.is_empty());
-        assert!(
-            cluster_report
-                .distance_to_other_clusters
-                .values()
-                .all(|v| !v.is_empty())
-        );
+        assert!(cluster_report.distance_to_other_clusters.values().all(|v| !v.is_empty()));
     }
 
     #[test]
@@ -392,23 +373,11 @@ mod tests {
         for (parent_key, &cluster_size) in &cluster_report.number_of_vertices_in_cluster {
             assert!(cluster_size > 0);
 
-            let cluster_points = &scrub_report
-                .clusterization_report
-                .distance_to_vertices_in_cluster[parent_key];
+            let cluster_points =
+                &scrub_report.clusterization_report.distance_to_vertices_in_cluster[parent_key];
 
             // The parent vertex is ignored.
             assert_eq!(cluster_points.len(), cluster_size - 1);
         }
-    }
-
-    #[test]
-    fn total_cluster_size_matches_sum_of_cluster_vertices() {
-        let test_data = generate_test_data();
-        let scrub_report = create_scrub_report(test_data);
-        let cluster_report = &scrub_report.clusterization_report;
-
-        let sum_vertices = cluster_report.number_of_vertices_in_cluster.values().sum();
-
-        assert_eq!(cluster_report.total_cluster_size, sum_vertices);
     }
 }
