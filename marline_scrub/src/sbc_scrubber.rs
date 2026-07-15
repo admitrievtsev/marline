@@ -38,7 +38,7 @@ impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
                 //println!("Searching for key {:?}", key_parts);
                 // Search fo
                 let mut part_key = None;
-                for (k, _v) in self.0.iter() {
+                for k in self.0.keys() {
                     let mut current_mismatches = 0;
 
                     #[allow(clippy::needless_range_loop)]
