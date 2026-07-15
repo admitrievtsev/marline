@@ -1,11 +1,11 @@
-use crate::SBCHash;
 use crate::decoder::Decoder;
 use crate::encoder::zdelta_comprassion_error::{
     DataConversionError, MatchEncodingError, StorageError,
 };
 use crate::encoder::zdelta_match_pointers::{MatchPointers, ReferencePointerType};
-use crate::encoder::{Encoder, count_delta_chunks_with_hash, get_parent_data};
+use crate::encoder::{count_delta_chunks_with_hash, get_parent_data, Encoder};
 use crate::sbc_scrubber::ClusterPoint;
+use crate::SBCHash;
 use crate::{ChunkType, SBCKey, SBCMap};
 use bit_vec::BitVec;
 use chunkfs::{Data, Database};
@@ -104,9 +104,7 @@ impl ZdeltaEncoder {
     pub fn new(use_huffman_encoding: bool) -> Self {
         if use_huffman_encoding {
             let (huffman_book, _) = create_default_huffman_book_and_tree();
-            Self {
-                huffman_book: Some(huffman_book),
-            }
+            Self { huffman_book: Some(huffman_book) }
         } else {
             Self { huffman_book: None }
         }
@@ -159,114 +157,114 @@ impl ZdeltaEncoder {
             );
             let hash = compute_triplet_hash(&triplet);
 
-            if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash)
-                && let Some((match_length, offset, pointer_type)) = select_best_match(
+            if let Some(parent_positions) = parent_triplet_lookup_table.get(&hash) {
+                if let Some((match_length, offset, pointer_type)) = select_best_match(
                     target_data,
                     parent_data,
                     position_in_target_data,
                     parent_positions,
                     &pointers,
-                )
-            {
-                if match_length < MIN_MATCH_LENGTH {
-                    self.encode_literal(
-                        target_data[position_in_target_data],
-                        &mut delta_code,
-                        &mut bit_vec_delta_code,
-                        &mut uncompressed_data,
-                    );
-                    position_in_target_data += 1;
-                    continue;
-                }
-                if let Some(book) = self.huffman_book() {
-                    match encode_match_huffman(
-                        match_length,
-                        offset,
-                        &pointer_type,
-                        book,
-                        target_data.len() - position_in_target_data,
-                    ) {
-                        Ok(encoded) => {
-                            bit_vec_delta_code.extend(&encoded);
-                        }
-                        Err(_) => {
-                            log::warn!(
-                                "Invalid match length \
+                ) {
+                    if match_length < MIN_MATCH_LENGTH {
+                        self.encode_literal(
+                            target_data[position_in_target_data],
+                            &mut delta_code,
+                            &mut bit_vec_delta_code,
+                            &mut uncompressed_data,
+                        );
+                        position_in_target_data += 1;
+                        continue;
+                    }
+                    if let Some(book) = self.huffman_book() {
+                        match encode_match_huffman(
+                            match_length,
+                            offset,
+                            &pointer_type,
+                            book,
+                            target_data.len() - position_in_target_data,
+                        ) {
+                            Ok(encoded) => {
+                                bit_vec_delta_code.extend(&encoded);
+                            }
+                            Err(_) => {
+                                log::warn!(
+                                    "Invalid match length \
                                 (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
                                 falling back to literal encoding"
-                            );
-
-                            for &byte in &target_data
-                                [position_in_target_data..position_in_target_data + match_length]
-                            {
-                                self.encode_literal(
-                                    byte,
-                                    &mut delta_code,
-                                    &mut bit_vec_delta_code,
-                                    &mut uncompressed_data,
                                 );
-                            }
-                        }
-                    }
-                } else {
-                    match encode_match_raw(
-                        match_length,
-                        offset,
-                        &pointer_type,
-                        target_data.len() - position_in_target_data,
-                    ) {
-                        Ok(encoded) => delta_code.extend_from_slice(&encoded),
-                        Err(e) => {
-                            match e {
-                                MatchEncodingError::InvalidLength(..) => {
-                                    log::warn!(
-                                        "Invalid match length \
-                                        (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
-                                        falling back to literal encoding"
+
+                                for &byte in &target_data[position_in_target_data
+                                    ..position_in_target_data + match_length]
+                                {
+                                    self.encode_literal(
+                                        byte,
+                                        &mut delta_code,
+                                        &mut bit_vec_delta_code,
+                                        &mut uncompressed_data,
                                     );
                                 }
-                                MatchEncodingError::InvalidParameterCombination => {
-                                    log::error!(
+                            }
+                        }
+                    } else {
+                        match encode_match_raw(
+                            match_length,
+                            offset,
+                            &pointer_type,
+                            target_data.len() - position_in_target_data,
+                        ) {
+                            Ok(encoded) => delta_code.extend_from_slice(&encoded),
+                            Err(e) => {
+                                match e {
+                                    MatchEncodingError::InvalidLength(..) => {
+                                        log::warn!(
+                                            "Invalid match length \
+                                        (allowed: {MIN_MATCH_LENGTH}-{MAX_MATCH_LENGTH}), \
+                                        falling back to literal encoding"
+                                        );
+                                    }
+                                    MatchEncodingError::InvalidParameterCombination => {
+                                        log::error!(
                                         "Invalid parameter combination \
                                         (length: {match_length}, offset: {offset}, pointer: {pointer_type:?})"
                                     );
+                                    }
                                 }
-                            }
-                            for &byte in &target_data
-                                [position_in_target_data..position_in_target_data + match_length]
-                            {
-                                delta_code.push(byte);
-                                uncompressed_data += 1;
+                                for &byte in &target_data[position_in_target_data
+                                    ..position_in_target_data + match_length]
+                                {
+                                    delta_code.push(byte);
+                                    uncompressed_data += 1;
+                                }
                             }
                         }
                     }
+
+                    let reference_match_end = match pointer_type {
+                        ReferencePointerType::TargetLocal => position_in_target_data + match_length,
+                        _ => {
+                            let base_ptr = pointers.get(&pointer_type);
+                            (base_ptr as isize + offset as isize + match_length as isize) as usize
+                        }
+                    };
+                    pointers.smart_update_after_match(
+                        reference_match_end,
+                        offset,
+                        pointer_type,
+                        previous_match_offset,
+                    );
+                    previous_match_offset = Some(offset);
+                    position_in_target_data += match_length;
+                    continue;
                 }
 
-                let reference_match_end = match pointer_type {
-                    ReferencePointerType::TargetLocal => position_in_target_data + match_length,
-                    _ => {
-                        let base_ptr = pointers.get(&pointer_type);
-                        (base_ptr as isize + offset as isize + match_length as isize) as usize
-                    }
-                };
-                pointers.smart_update_after_match(
-                    reference_match_end,
-                    offset,
-                    pointer_type,
-                    previous_match_offset,
+                self.encode_literal(
+                    target_data[position_in_target_data],
+                    &mut delta_code,
+                    &mut bit_vec_delta_code,
+                    &mut uncompressed_data,
                 );
-                previous_match_offset = Some(offset);
-                position_in_target_data += match_length;
-                continue;
+                position_in_target_data += 1;
             }
-
-            self.encode_literal(
-                target_data[position_in_target_data],
-                &mut delta_code,
-                &mut bit_vec_delta_code,
-                &mut uncompressed_data,
-            );
-            position_in_target_data += 1;
         }
 
         while position_in_target_data < target_data.len() {
@@ -339,10 +337,7 @@ fn store_delta_chunk<D: Decoder, Hash: SBCHash>(
     let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &target_hash);
     let sbc_hash = SBCKey {
         hash: target_hash,
-        chunk_type: ChunkType::Delta {
-            parent_hash,
-            number: number_delta_chunk,
-        },
+        chunk_type: ChunkType::Delta { parent_hash, number: number_delta_chunk },
     };
 
     target_map_lock
@@ -399,14 +394,11 @@ fn encode_match_huffman(
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &flag)
-        .expect("Flag codes (1-20) must be in codebook");
+    book.encode(&mut buffer, &flag).expect("Flag codes (1-20) must be in codebook");
     book.encode(&mut buffer, &length_remainder)
         .expect("Length remainders (0-255) must be in codebook");
-    book.encode(&mut buffer, &offset_high)
-        .expect("Offset bytes (0-255) must be in codebook");
-    book.encode(&mut buffer, &offset_low)
-        .expect("Offset bytes (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_high).expect("Offset bytes (0-255) must be in codebook");
+    book.encode(&mut buffer, &offset_low).expect("Offset bytes (0-255) must be in codebook");
 
     Ok(buffer)
 }
@@ -463,10 +455,8 @@ fn encode_literal_huffman(literal: u8, book: &Book<u8>) -> BitVec {
     use bit_vec::BitVec;
     let mut buffer = BitVec::new();
 
-    book.encode(&mut buffer, &LITERAL_FLAG)
-        .expect("Literal flag must be in codebook");
-    book.encode(&mut buffer, &literal)
-        .expect("All literals (0-255) must be in codebook");
+    book.encode(&mut buffer, &LITERAL_FLAG).expect("Literal flag must be in codebook");
+    book.encode(&mut buffer, &literal).expect("All literals (0-255) must be in codebook");
 
     buffer
 }
@@ -879,10 +869,7 @@ mod tests {
         for (length, offset, pointer_type, _) in test_cases {
             let result = encode_match_huffman(length, offset as i16, &pointer_type, &book, length);
 
-            assert!(
-                result.is_ok(),
-                "Failed to encode length {length}, offset {offset}"
-            );
+            assert!(result.is_ok(), "Failed to encode length {length}, offset {offset}");
             let encoded = result.unwrap();
             assert!(!encoded.is_empty(), "Encoded data should not be empty");
         }
@@ -964,8 +951,8 @@ mod tests {
     }
 
     #[test]
-    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals()
-     {
+    fn create_default_huffman_book_and_tree_should_assign_shorter_codes_to_ascii_vs_non_ascii_literals(
+    ) {
         let (book, _) = create_default_huffman_book_and_tree();
 
         let ascii_len = encode_to_bits(&book, 65).len();
@@ -979,10 +966,7 @@ mod tests {
         let (book, _) = create_default_huffman_book_and_tree();
 
         for i in 0..=255u8 {
-            assert!(
-                !encode_to_bits(&book, i).is_empty(),
-                "Failed to encode byte {i}"
-            );
+            assert!(!encode_to_bits(&book, i).is_empty(), "Failed to encode byte {i}");
         }
     }
 
@@ -1028,70 +1012,31 @@ mod tests {
     #[test]
     fn encode_match_raw_should_reject_length_above_maximum() {
         let result = encode_match_raw(2000, 100, &ReferencePointerType::Main, 2000);
-        assert_eq!(
-            result,
-            Err(MatchEncodingError::InvalidLength(2000, 3, 1026))
-        );
+        assert_eq!(result, Err(MatchEncodingError::InvalidLength(2000, 3, 1026)));
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_target_local() {
-        assert_eq!(
-            encode_match_flag(0, &ReferencePointerType::TargetLocal, true),
-            Ok(1)
-        );
-        assert_eq!(
-            encode_match_flag(1, &ReferencePointerType::TargetLocal, false),
-            Ok(6)
-        );
-        assert_eq!(
-            encode_match_flag(2, &ReferencePointerType::TargetLocal, true),
-            Ok(11)
-        );
-        assert_eq!(
-            encode_match_flag(3, &ReferencePointerType::TargetLocal, false),
-            Ok(16)
-        );
+        assert_eq!(encode_match_flag(0, &ReferencePointerType::TargetLocal, true), Ok(1));
+        assert_eq!(encode_match_flag(1, &ReferencePointerType::TargetLocal, false), Ok(6));
+        assert_eq!(encode_match_flag(2, &ReferencePointerType::TargetLocal, true), Ok(11));
+        assert_eq!(encode_match_flag(3, &ReferencePointerType::TargetLocal, false), Ok(16));
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_main_pointer() {
-        assert_eq!(
-            encode_match_flag(0, &ReferencePointerType::Main, true),
-            Ok(2)
-        );
-        assert_eq!(
-            encode_match_flag(1, &ReferencePointerType::Main, true),
-            Ok(7)
-        );
-        assert_eq!(
-            encode_match_flag(2, &ReferencePointerType::Main, false),
-            Ok(13)
-        );
-        assert_eq!(
-            encode_match_flag(3, &ReferencePointerType::Main, false),
-            Ok(18)
-        );
+        assert_eq!(encode_match_flag(0, &ReferencePointerType::Main, true), Ok(2));
+        assert_eq!(encode_match_flag(1, &ReferencePointerType::Main, true), Ok(7));
+        assert_eq!(encode_match_flag(2, &ReferencePointerType::Main, false), Ok(13));
+        assert_eq!(encode_match_flag(3, &ReferencePointerType::Main, false), Ok(18));
     }
 
     #[test]
     fn encode_match_flag_should_return_correct_flag_for_auxiliary_pointer() {
-        assert_eq!(
-            encode_match_flag(0, &ReferencePointerType::Auxiliary, true),
-            Ok(4)
-        );
-        assert_eq!(
-            encode_match_flag(1, &ReferencePointerType::Auxiliary, true),
-            Ok(9)
-        );
-        assert_eq!(
-            encode_match_flag(2, &ReferencePointerType::Auxiliary, false),
-            Ok(15)
-        );
-        assert_eq!(
-            encode_match_flag(3, &ReferencePointerType::Auxiliary, false),
-            Ok(20)
-        );
+        assert_eq!(encode_match_flag(0, &ReferencePointerType::Auxiliary, true), Ok(4));
+        assert_eq!(encode_match_flag(1, &ReferencePointerType::Auxiliary, true), Ok(9));
+        assert_eq!(encode_match_flag(2, &ReferencePointerType::Auxiliary, false), Ok(15));
+        assert_eq!(encode_match_flag(3, &ReferencePointerType::Auxiliary, false), Ok(20));
     }
 
     #[test]
@@ -1104,10 +1049,7 @@ mod tests {
 
     #[test]
     fn calculate_length_components_should_calculate_correctly_for_min_length() {
-        assert_eq!(
-            calculate_length_components(MIN_MATCH_LENGTH, MIN_MATCH_LENGTH),
-            (0, 0)
-        );
+        assert_eq!(calculate_length_components(MIN_MATCH_LENGTH, MIN_MATCH_LENGTH), (0, 0));
         assert_eq!(calculate_length_components(MIN_MATCH_LENGTH, 10), (0, 0));
     }
 
@@ -1122,10 +1064,7 @@ mod tests {
     fn calculate_length_components_should_calculate_correctly_for_max_length() {
         assert_eq!(calculate_length_components(1024, 1024), (253, 3));
         assert_eq!(calculate_length_components(1026, 1024), (253, 3));
-        assert_eq!(
-            calculate_length_components(MAX_MATCH_LENGTH, MAX_MATCH_LENGTH),
-            (255, 3)
-        );
+        assert_eq!(calculate_length_components(MAX_MATCH_LENGTH, MAX_MATCH_LENGTH), (255, 3));
     }
 
     #[test]
@@ -1266,10 +1205,7 @@ mod tests {
 
         assert_eq!(table.len(), 3);
 
-        assert_eq!(
-            table.get(&compute_triplet_hash(b"abc")),
-            Some(&vec![0, 3, 6])
-        );
+        assert_eq!(table.get(&compute_triplet_hash(b"abc")), Some(&vec![0, 3, 6]));
         assert_eq!(table.get(&compute_triplet_hash(b"bca")), Some(&vec![1, 4]));
         assert_eq!(table.get(&compute_triplet_hash(b"cab")), Some(&vec![2, 5]));
     }
@@ -1294,8 +1230,7 @@ mod tests {
 
     fn encode_to_bits(book: &Book<u8>, symbol: u8) -> BitVec {
         let mut buffer = BitVec::new();
-        book.encode(&mut buffer, &symbol)
-            .expect("Encoding failed in test");
+        book.encode(&mut buffer, &symbol).expect("Encoding failed in test");
         buffer
     }
 

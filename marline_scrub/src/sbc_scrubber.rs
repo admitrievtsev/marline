@@ -7,8 +7,8 @@ use marline_sketcher::SBCHasher;
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
-use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
 use std::io;
 use std::io::{Error, ErrorKind};
@@ -120,15 +120,10 @@ impl<D: Decoder, Hash: SBCHash> Database<SBCKey<Hash>, Vec<u8>> for SBCMap<D, Ha
 
         let chunk = match &sbc_hash.chunk_type {
             ChunkType::Simple => sbc_value.clone(),
-            ChunkType::Delta {
-                parent_hash,
-                number: _,
-            } => {
+            ChunkType::Delta { parent_hash, number: _ } => {
                 // Recursively get the parent chunk as a simple chunk
-                let parent_data = self.get(&SBCKey {
-                    hash: parent_hash.clone(),
-                    chunk_type: ChunkType::Simple,
-                })?;
+                let parent_data =
+                    self.get(&SBCKey { hash: parent_hash.clone(), chunk_type: ChunkType::Simple })?;
 
                 // Decode the delta chunk using the decoder
                 self.decoder.decode_chunk(parent_data, sbc_value.as_slice())
@@ -271,11 +266,7 @@ where
     ///
     /// A new `SBCScrubber` ready to process chunks.
     pub fn new(hasher: H, clusterer: C, encoder: E) -> Self {
-        SBCScrubber {
-            hasher,
-            clusterer,
-            encoder,
-        }
+        SBCScrubber { hasher, clusterer, encoder }
     }
 }
 
@@ -312,10 +303,7 @@ where
         CDCHash: 'a,
     {
         // Create a thread pool with a fixed number of threads for hashing
-        let pool = ThreadPoolBuilder::new()
-            .num_threads(NUM_THREADS_FOR_HASHING)
-            .build()
-            .unwrap();
+        let pool = ThreadPoolBuilder::new().num_threads(NUM_THREADS_FOR_HASHING).build().unwrap();
 
         // Collect mutable references to all data containers from the database
         let mut mut_refs_database: Vec<_> = database.values_mut().collect();
@@ -345,9 +333,8 @@ where
 
         // 2. Clustering: group chunks by similarity
         let time_clusterize_start = time_start.elapsed();
-        let (mut clusters, clusterization_report) = self
-            .clusterer
-            .clusterize(sbc_hash_chunk.into_inner().unwrap());
+        let (mut clusters, clusterization_report) =
+            self.clusterer.clusterize(sbc_hash_chunk.into_inner().unwrap());
         let time_clusterize =
             time_start.elapsed().as_secs_f64() - time_clusterize_start.as_secs_f64();
         print!("ClusterTime: {time_clusterize:.4};");
@@ -360,11 +347,6 @@ where
 
         let running_time = time_start.elapsed();
 
-        Ok(ScrubMeasurements {
-            processed_data,
-            running_time,
-            data_left,
-            clusterization_report,
-        })
+        Ok(ScrubMeasurements { processed_data, running_time, data_left, clusterization_report })
     }
 }

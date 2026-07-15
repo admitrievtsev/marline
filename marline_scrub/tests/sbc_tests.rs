@@ -4,12 +4,12 @@ mod test {
     extern crate marline_scrub;
     extern crate marline_sketcher;
 
-    use chunkfs::FileSystem;
     use chunkfs::chunkers::SuperChunker;
     use chunkfs::hashers::Sha256Hasher;
+    use chunkfs::FileSystem;
     use marline_scrub::decoder::{GdeltaDecoder, LevenshteinDecoder};
     use marline_scrub::encoder::{GdeltaEncoder, LevenshteinEncoder};
-    use marline_scrub::{SBCMap, SBCScrubber, clusterer};
+    use marline_scrub::{clusterer, SBCMap, SBCScrubber};
 
     use std::collections::HashMap;
 
@@ -25,9 +25,7 @@ mod test {
             )),
             Sha256Hasher::default(),
         );
-        let mut handle = fs
-            .create_file("file".to_string(), SuperChunker::default())
-            .unwrap();
+        let mut handle = fs.create_file("file".to_string(), SuperChunker::default()).unwrap();
         let data = generate_data(3);
         fs.write_to_file(&mut handle, &data).unwrap();
         fs.close_file(handle).unwrap();
@@ -51,9 +49,7 @@ mod test {
             )),
             Sha256Hasher::default(),
         );
-        let mut handle = fs
-            .create_file("file".to_string(), SuperChunker::default())
-            .unwrap();
+        let mut handle = fs.create_file("file".to_string(), SuperChunker::default()).unwrap();
         let data = generate_data(8);
         fs.write_to_file(&mut handle, &data).unwrap();
         fs.close_file(handle).unwrap();

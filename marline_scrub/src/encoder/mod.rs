@@ -16,8 +16,8 @@ pub use gdelta_encoder::GdeltaEncoder;
 
 pub(crate) use levenshtein_encoder::Action;
 pub use levenshtein_encoder::LevenshteinEncoder;
-use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
+use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::XdeltaEncoder;
 
@@ -72,27 +72,21 @@ pub trait Encoder {
         let processed_data = Mutex::new(0);
         let target_map_ref = Arc::new(Mutex::new(target_map));
         pool.install(|| {
-            clusters
-                .0
-                .par_iter_mut()
-                .for_each(|(parent_hash, cluster)| {
-                    let data_analyse = self.encode_cluster(
-                        target_map_ref.clone(),
-                        cluster.as_mut_slice(),
-                        parent_hash.clone(),
-                    );
+            clusters.0.par_iter_mut().for_each(|(parent_hash, cluster)| {
+                let data_analyse = self.encode_cluster(
+                    target_map_ref.clone(),
+                    cluster.as_mut_slice(),
+                    parent_hash.clone(),
+                );
 
-                    let mut data_left_lock = data_left.lock().unwrap();
-                    *data_left_lock += data_analyse.0;
+                let mut data_left_lock = data_left.lock().unwrap();
+                *data_left_lock += data_analyse.0;
 
-                    let mut processed_data_lock = processed_data.lock().unwrap();
-                    *processed_data_lock += data_analyse.1;
-                });
+                let mut processed_data_lock = processed_data.lock().unwrap();
+                *processed_data_lock += data_analyse.1;
+            });
         });
-        (
-            data_left.into_inner().unwrap(),
-            processed_data.into_inner().unwrap(),
-        )
+        (data_left.into_inner().unwrap(), processed_data.into_inner().unwrap())
     }
 }
 
@@ -145,10 +139,7 @@ fn count_delta_chunks_with_hash<D: Decoder, Hash: SBCHash>(
         .filter(|(sbc_key, _)| {
             sbc_key.hash == *hash
                 && match sbc_key.chunk_type {
-                    ChunkType::Delta {
-                        parent_hash: _,
-                        number: _,
-                    } => true,
+                    ChunkType::Delta { parent_hash: _, number: _ } => true,
                     ChunkType::Simple => false,
                 }
         })
@@ -163,19 +154,13 @@ fn find_empty_cell<D: Decoder, Hash: SBCHash>(
     let mut left = hash.clone();
     let mut right = hash.next_hash();
     loop {
-        if target_map.contains(&SBCKey {
-            hash: left.clone(),
-            chunk_type: ChunkType::Simple,
-        }) {
+        if target_map.contains(&SBCKey { hash: left.clone(), chunk_type: ChunkType::Simple }) {
             left = left.last_hash();
         } else {
             return left;
         }
 
-        if target_map.contains(&SBCKey {
-            hash: right.clone(),
-            chunk_type: ChunkType::Simple,
-        }) {
+        if target_map.contains(&SBCKey { hash: right.clone(), chunk_type: ChunkType::Simple }) {
             right = right.next_hash();
         } else {
             return right;
@@ -188,10 +173,8 @@ fn encode_simple_chunk<D: Decoder, Hash: SBCHash>(
     data: &[u8],
     hash: Hash,
 ) -> (usize, SBCKey<Hash>) {
-    let sbc_hash = SBCKey {
-        hash: find_empty_cell(target_map, &hash),
-        chunk_type: ChunkType::Simple,
-    };
+    let sbc_hash =
+        SBCKey { hash: find_empty_cell(target_map, &hash), chunk_type: ChunkType::Simple };
 
     let _ = target_map.insert(sbc_hash.clone(), data.to_vec());
 
@@ -210,15 +193,9 @@ fn get_parent_data<D: Decoder, Hash: SBCHash>(
     cluster: &mut [ClusterPoint<Hash>],
 ) -> ParentChunkInCluster {
     let mut target_map_lock = target_map.lock().unwrap();
-    match target_map_lock.get(&SBCKey {
-        hash: parent_hash.clone(),
-        chunk_type: ChunkType::Simple,
-    }) {
-        Ok(parent_data) => ParentChunkInCluster {
-            index: -1,
-            parent_data,
-            data_left: 0,
-        },
+    match target_map_lock.get(&SBCKey { hash: parent_hash.clone(), chunk_type: ChunkType::Simple })
+    {
+        Ok(parent_data) => ParentChunkInCluster { index: -1, parent_data, data_left: 0 },
         Err(_) => {
             let (_, parent_data_container) = &mut cluster[0];
             let parent_data = match parent_data_container.extract() {
@@ -229,11 +206,7 @@ fn get_parent_data<D: Decoder, Hash: SBCHash>(
                 encode_simple_chunk(&mut target_map_lock, parent_data.as_slice(), parent_hash);
 
             parent_data_container.make_target(vec![parent_sbc_hash]);
-            ParentChunkInCluster {
-                index: 0,
-                parent_data,
-                data_left,
-            }
+            ParentChunkInCluster { index: 0, parent_data, data_left }
         }
     }
 }

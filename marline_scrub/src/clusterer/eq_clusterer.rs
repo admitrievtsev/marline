@@ -1,6 +1,6 @@
-use crate::SBCHash;
 use crate::clusterer::Clusterer;
 use crate::sbc_scrubber::{ClusterPoint, Clusters, EqCluster};
+use crate::SBCHash;
 use chunkfs::ClusteringMeasurements;
 use std::collections::HashMap;
 
@@ -131,10 +131,7 @@ struct ClusterStats {
 impl ClusterStats {
     /// Creates a new empty `ClusterStats`.
     fn new() -> Self {
-        ClusterStats {
-            total_cluster_size: 0,
-            number_of_clusters: 0,
-        }
+        ClusterStats { total_cluster_size: 0, number_of_clusters: 0 }
     }
 
     /// Converts the statistics into a `ClusteringMeasurements` struct.

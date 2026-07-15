@@ -1,7 +1,7 @@
 use crate::decoder::Decoder;
 use crate::encoder::{
-    Encoder, count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
-    get_parent_data,
+    count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
+    get_parent_data, Encoder,
 };
 use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
@@ -178,19 +178,11 @@ fn prepare_and_store_delta_chunk<D: Decoder, Hash: SBCHash>(
 ) -> (usize, SBCKey<Hash>) {
     let mut target_map_lock = target_map.lock().unwrap();
     let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
-    let sbc_hash = SBCKey {
-        hash,
-        chunk_type: ChunkType::Delta {
-            parent_hash,
-            number: number_delta_chunk,
-        },
-    };
+    let sbc_hash =
+        SBCKey { hash, chunk_type: ChunkType::Delta { parent_hash, number: number_delta_chunk } };
 
-    let delta_code = if zstd_flag {
-        stream::encode_all(delta_code.as_slice(), 0).unwrap()
-    } else {
-        delta_code
-    };
+    let delta_code =
+        if zstd_flag { stream::encode_all(delta_code.as_slice(), 0).unwrap() } else { delta_code };
 
     let processed_data = delta_code.len();
     let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
@@ -323,10 +315,7 @@ fn create_block_hashmap(source_data: &[u8]) -> HashMap<u32, Vec<usize>> {
 
     while i + BLOCK_SIZE <= source_data.len() {
         let block_hash = adler32(&source_data[i..i + BLOCK_SIZE]);
-        block_position_map
-            .entry(block_hash)
-            .or_insert_with(Vec::new)
-            .push(i);
+        block_position_map.entry(block_hash).or_insert_with(Vec::new).push(i);
         i += 1;
     }
 
@@ -362,10 +351,7 @@ mod test {
     fn create_block_hashmap_should_store_first_position_for_duplicate_blocks() {
         let data = b"abcdabcdabcdabcdabcdabcdabcdabcd";
         let result = create_block_hashmap(data);
-        assert_eq!(
-            result.get(&adler32(b"abcdabcdabcdabcd")),
-            Some(&vec![0, 4, 8, 12, 16])
-        );
+        assert_eq!(result.get(&adler32(b"abcdabcdabcdabcd")), Some(&vec![0, 4, 8, 12, 16]));
         assert_eq!(result.len(), 3);
     }
 
@@ -428,13 +414,7 @@ mod test {
         let mut delta_code = Vec::new();
         let mut i = 0;
 
-        encode_insert_sequence(
-            &chunk_data,
-            &mut i,
-            &word_hash_offsets,
-            &mut delta_code,
-            hash,
-        );
+        encode_insert_sequence(&chunk_data, &mut i, &word_hash_offsets, &mut delta_code, hash);
 
         assert!(delta_code.is_empty());
         assert_eq!(i, 0);
@@ -504,14 +484,7 @@ mod test {
         let mut delta = vec![];
         let hash = adler32(&chunk[i..i + BLOCK_SIZE]);
 
-        encode_copy_sequence(
-            &parent,
-            &chunk,
-            &mut i,
-            &mut delta,
-            hash,
-            &word_hash_offsets,
-        );
+        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
 
         assert_eq!(i, 24);
         assert_eq!(delta[..3], 24u32.to_ne_bytes()[..3]);
@@ -528,14 +501,7 @@ mod test {
         let mut i = 0;
         let mut delta = vec![];
 
-        encode_copy_sequence(
-            &parent,
-            &chunk,
-            &mut i,
-            &mut delta,
-            hash,
-            &word_hash_offsets,
-        );
+        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
 
         assert_eq!(i, BLOCK_SIZE);
     }
@@ -550,14 +516,7 @@ mod test {
         let mut delta = vec![];
         let invalid_hash = adler32(b"invalid_block____");
 
-        encode_copy_sequence(
-            &parent,
-            &chunk,
-            &mut i,
-            &mut delta,
-            invalid_hash,
-            &word_hash_offsets,
-        );
+        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, invalid_hash, &word_hash_offsets);
 
         assert!(delta.is_empty());
         assert_eq!(i, 0);
@@ -573,14 +532,7 @@ mod test {
         let mut delta = vec![];
         let hash = adler32(&[0; BLOCK_SIZE]);
 
-        encode_copy_sequence(
-            &parent,
-            &chunk,
-            &mut i,
-            &mut delta,
-            hash,
-            &word_hash_offsets,
-        );
+        encode_copy_sequence(&parent, &chunk, &mut i, &mut delta, hash, &word_hash_offsets);
 
         assert!(delta.is_empty());
         assert_eq!(i, chunk.len());
@@ -684,10 +636,7 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -703,10 +652,7 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -719,19 +665,13 @@ mod test {
     fn create_map_and_key<'a>(
         data: &'a [u8],
         data2: &'a [u8],
-    ) -> (
-        SBCMap<decoder::GdeltaDecoder, AronovichHash>,
-        SBCKey<AronovichHash>,
-    ) {
+    ) -> (SBCMap<decoder::GdeltaDecoder, AronovichHash>, SBCKey<AronovichHash>) {
         let word_hash_offsets = create_block_hashmap(data);
         let mut binding = SBCMap::new(decoder::GdeltaDecoder::default());
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) = encode_simple_chunk(
-            &mut sbc_map.lock().unwrap(),
-            data,
-            AronovichHash::new_with_u32(0),
-        );
+        let (_, sbc_key) =
+            encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new_with_u32(0));
         let (_, _, sbc_key_2) = XdeltaEncoder::default().encode_delta_chunk(
             sbc_map.clone(),
             data2,

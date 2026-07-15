@@ -96,9 +96,6 @@ impl<D: Decoder, H: SBCHash> SBCMap<D, H> {
     ///
     /// A new `SBCMap` ready to store chunks and decode them on demand.
     pub fn new(decoder: D) -> Self {
-        SBCMap {
-            sbc_hashmap: HashMap::new(),
-            decoder,
-        }
+        SBCMap { sbc_hashmap: HashMap::new(), decoder }
     }
 }

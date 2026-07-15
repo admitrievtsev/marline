@@ -1,11 +1,11 @@
-use crate::SBCHash;
 use crate::decoder::Decoder;
 use crate::encoder::gdelta_encoder::GEAR;
 use crate::encoder::{
-    Encoder, count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
-    get_parent_data,
+    count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
+    get_parent_data, Encoder,
 };
 use crate::sbc_scrubber::ClusterPoint;
+use crate::SBCHash;
 use crate::{ChunkType, SBCKey, SBCMap};
 use chunkfs::{Data, Database};
 use fasthash::spooky;
@@ -96,17 +96,13 @@ impl DdeltaEncoder {
     /// Use EdeltaOptimizations enum when creating a DdeltaEncoder if you want to use the optimized version of Ddelta (Edelta).
     /// Or pass None as a parameter.
     pub fn new() -> DdeltaEncoder {
-        DdeltaEncoder {
-            edelta_optimizations: None,
-        }
+        DdeltaEncoder { edelta_optimizations: None }
     }
 
     pub fn new_with_edelta_optimizations(
         edelta_optimizations: EdeltaOptimizations,
     ) -> DdeltaEncoder {
-        DdeltaEncoder {
-            edelta_optimizations: Some(edelta_optimizations),
-        }
+        DdeltaEncoder { edelta_optimizations: Some(edelta_optimizations) }
     }
 
     /// Encodes a single data chunk using delta compression against a reference.
@@ -284,11 +280,7 @@ fn process_target_chunk_with_ddelta(
 ) {
     match find_match_ddelta(source_data, source_chunks_indices, target_chunk) {
         Some(start_of_match_in_source_data) => {
-            encode_copy_instruction(
-                target_chunk.len(),
-                start_of_match_in_source_data,
-                delta_code,
-            );
+            encode_copy_instruction(target_chunk.len(), start_of_match_in_source_data, delta_code);
         }
         None => {
             encode_insert_instruction(target_chunk.to_vec(), delta_code);
@@ -317,13 +309,8 @@ fn store_delta_chunk<D: Decoder, Hash: SBCHash>(
 ) -> (usize, SBCKey<Hash>) {
     let mut target_map_lock = target_map.lock().unwrap();
     let number_delta_chunk = count_delta_chunks_with_hash(&target_map_lock, &hash);
-    let sbc_hash = SBCKey {
-        hash,
-        chunk_type: ChunkType::Delta {
-            parent_hash,
-            number: number_delta_chunk,
-        },
-    };
+    let sbc_hash =
+        SBCKey { hash, chunk_type: ChunkType::Delta { parent_hash, number: number_delta_chunk } };
 
     let processed_data = delta_code.len();
     let _ = target_map_lock.insert(sbc_hash.clone(), delta_code);
@@ -431,12 +418,7 @@ fn find_match_compression_is_priority(
         }
     }
 
-    Some((
-        start_of_match_in_source_data,
-        number_of_processed_chunks,
-        match_length,
-        0,
-    ))
+    Some((start_of_match_in_source_data, number_of_processed_chunks, match_length, 0))
 }
 
 /// Finds a matching chunk in source data for the given target chunk.
@@ -533,7 +515,7 @@ mod test {
     use marline_sketcher::AronovichHash;
 
     use rand::prelude::StdRng;
-    use rand::{RngExt, SeedableRng, rng};
+    use rand::{rng, RngExt, SeedableRng};
 
     #[test]
     fn process_target_chunk_with_edelta_should_process_full_match_with_compression_priority() {
@@ -791,10 +773,8 @@ mod test {
     fn find_match_compression_is_priority_should_return_correct_value_for_exact_match() {
         let source_data = b"__PATTERN1__PATTERN2__";
         let target_chunks: Vec<&[u8]> = vec![b"_PATTERN2__"];
-        let source_chunks = vec![
-            &source_data[0..source_data.len() / 2],
-            &source_data[source_data.len() / 2..],
-        ];
+        let source_chunks =
+            vec![&source_data[0..source_data.len() / 2], &source_data[source_data.len() / 2..]];
         let chunk_indices = build_chunks_indices(&source_chunks);
 
         assert_eq!(
@@ -914,11 +894,7 @@ mod test {
             indices.get(&hash),
             "Only first position should be stored for duplicates"
         );
-        assert_eq!(
-            indices.len(),
-            1,
-            "HashMap should contain only one entry for duplicate chunks"
-        );
+        assert_eq!(indices.len(), 1, "HashMap should contain only one entry for duplicate chunks");
     }
 
     #[test]
@@ -948,10 +924,7 @@ mod test {
         rng.fill(&mut data[..]);
 
         let chunks = gear_chunking(&data);
-        assert!(
-            chunks.len() > 1,
-            "Data should be split into multiple chunks"
-        );
+        assert!(chunks.len() > 1, "Data should be split into multiple chunks");
     }
 
     #[test]
@@ -1059,10 +1032,7 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1079,10 +1049,7 @@ mod test {
         assert_ne!(data, []);
         assert_eq!(
             sbc_key.chunk_type,
-            ChunkType::Delta {
-                parent_hash: AronovichHash::new_with_u32(0),
-                number: 0
-            }
+            ChunkType::Delta { parent_hash: AronovichHash::new_with_u32(0), number: 0 }
         );
         assert_eq!(sbc_map.get(&sbc_key).unwrap(), data2);
     }
@@ -1102,20 +1069,14 @@ mod test {
         data: &'a [u8],
         data2: &'a [u8],
         edelta_optimizations: EdeltaOptimizations,
-    ) -> (
-        SBCMap<decoder::GdeltaDecoder, AronovichHash>,
-        SBCKey<AronovichHash>,
-    ) {
+    ) -> (SBCMap<decoder::GdeltaDecoder, AronovichHash>, SBCKey<AronovichHash>) {
         let source_chunks = gear_chunking(data);
         let mut word_hash_offsets = build_chunks_indices(&source_chunks);
         let mut binding = SBCMap::new(decoder::GdeltaDecoder::default());
         let sbc_map = Arc::new(Mutex::new(&mut binding));
 
-        let (_, sbc_key) = encode_simple_chunk(
-            &mut sbc_map.lock().unwrap(),
-            data,
-            AronovichHash::new_with_u32(0),
-        );
+        let (_, sbc_key) =
+            encode_simple_chunk(&mut sbc_map.lock().unwrap(), data, AronovichHash::new_with_u32(0));
         let ddelta_encoder = DdeltaEncoder::new_with_edelta_optimizations(edelta_optimizations);
         let (_, _, sbc_key_2) = ddelta_encoder.encode_delta_chunk(
             sbc_map.clone(),
