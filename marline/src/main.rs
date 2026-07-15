@@ -9,8 +9,8 @@ use marline_scrub::{clusterer, decoder};
 use marline_scrub::{SBCMap, SBCScrubber};
 use marline_sketcher::OdessHasher;
 use std::collections::HashMap;
+use std::io;
 use std::time::Instant;
-use std::{fs, io};
 
 #[derive(Debug)]
 struct Measurement {
@@ -23,8 +23,8 @@ struct Measurement {
 }
 
 fn main() -> io::Result<()> {
-    let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
-    // let data = vec![0u8; 10 * 1024 * 1024];
+    // let data = fs::read("/home/alexei/Work/chunkfs_eunner/src/files/kernels.tar")?;
+    let data = vec![0u8; 10 * 1024 * 1024];
     let num_iterations = 1;
     let mut measurements = Vec::new();
 
