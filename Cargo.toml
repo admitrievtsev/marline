@@ -1,6 +1,6 @@
 [workspace]
 members = ["marline", "marline_delta", "marline_scrub", "marline_sketcher"]
-resolver = "3"
+resolver = "2"
 
 [workspace.package]
 version = "0.0.0"
