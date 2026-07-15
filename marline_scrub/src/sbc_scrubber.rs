@@ -189,13 +189,13 @@ impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCM
 ///
 /// ```
 /// extern crate chunkfs;
-/// extern crate sbc_algorithm;
+/// extern crate marline_scrub;
 ///
 /// use chunkfs::chunkers::{SizeParams, SuperChunker};
 /// use chunkfs::hashers::Sha256Hasher;
 /// use chunkfs::FileSystem;
-/// use sbc_algorithm::{SBCMap, SBCScrubber};
-/// use sbc_algorithm::{decoder, encoder, hasher, clusterer};
+/// use marline_scrub::{SBCMap, SBCScrubber};
+/// use marline_scrub::{decoder, encoder, clusterer};
 /// use std::collections::HashMap;
 /// use std::io;
 ///
@@ -206,7 +206,7 @@ impl<D: Decoder, Hash: SBCHash> IterableDatabase<SBCKey<Hash>, Vec<u8>> for SBCM
 ///         HashMap::default(),
 ///         SBCMap::new(decoder::GdeltaDecoder::default()),
 ///         Box::new(SBCScrubber::new(
-///             hasher::AronovichHasher,
+///             marline_sketcher::AronovichHasher,
 ///             clusterer::GraphClusterer::default(),
 ///             encoder::GdeltaEncoder::default(),
 ///         )),

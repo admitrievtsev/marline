@@ -61,7 +61,7 @@ pub enum IndexType {
     /// # Ejemplo
     ///
     /// ```
-    /// use sbc_algorithm::hasher::odess_hasher::{IndexType, SuperFeatureConfig};
+    /// use marline_sketcher::odess_hasher::{IndexType, SuperFeatureConfig};
     ///
     /// let config = SuperFeatureConfig::new(2, 6);
     /// let index_type = IndexType::SuperFeatured(config);

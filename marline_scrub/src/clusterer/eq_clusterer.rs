@@ -26,7 +26,7 @@ use std::collections::HashMap;
 /// # Example
 ///
 /// ```
-/// # use sbc_algorithm::clusterer::EqClusterer;
+/// # use marline_scrub::clusterer::EqClusterer;
 ///
 /// let mut clusterer = EqClusterer::new(2);
 /// // Use clusterer.clusterize(...) to cluster chunks.

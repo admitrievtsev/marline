@@ -71,9 +71,9 @@ pub struct SBCKey<H: SBCHash> {
 /// # Example
 ///
 /// ```
-/// use sbc_algorithm::decoder::LevenshteinDecoder;
-/// use sbc_algorithm::hasher::AronovichHash;
-/// use sbc_algorithm::SBCMap;
+/// use marline_scrub::decoder::LevenshteinDecoder;
+/// use marline_sketcher::AronovichHash;
+/// use marline_scrub::SBCMap;
 ///
 /// let mut map: SBCMap<LevenshteinDecoder, AronovichHash> = SBCMap::new(LevenshteinDecoder::default());
 /// ```
