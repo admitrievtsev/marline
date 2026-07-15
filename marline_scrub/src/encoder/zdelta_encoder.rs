@@ -722,9 +722,9 @@ mod tests {
     use super::*;
     use crate::decoder::ZdeltaDecoder;
     use crate::encoder::encode_simple_chunk;
-    use crate::hasher::AronovichHash;
     use bit_vec::BitVec;
     use huffman_compress::Book;
+    use marline_sketcher::AronovichHash;
     use std::sync::{Arc, Mutex};
 
     const TEST_DATA_SIZE: usize = 9008 + 100;

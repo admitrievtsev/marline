@@ -1,13 +1,16 @@
 #[cfg(test)]
 mod test {
     extern crate chunkfs;
-    extern crate sbc_algorithm;
+    extern crate marline_scrub;
+    extern crate marline_sketcher;
+
     use chunkfs::FileSystem;
     use chunkfs::chunkers::SuperChunker;
     use chunkfs::hashers::Sha256Hasher;
-    use sbc_algorithm::decoder::{GdeltaDecoder, LevenshteinDecoder};
-    use sbc_algorithm::encoder::{GdeltaEncoder, LevenshteinEncoder};
-    use sbc_algorithm::{SBCMap, SBCScrubber, clusterer, hasher};
+    use marline_scrub::decoder::{GdeltaDecoder, LevenshteinDecoder};
+    use marline_scrub::encoder::{GdeltaEncoder, LevenshteinEncoder};
+    use marline_scrub::{SBCMap, SBCScrubber, clusterer};
+
     use std::collections::HashMap;
 
     #[test]
@@ -16,7 +19,7 @@ mod test {
             HashMap::default(),
             SBCMap::new(LevenshteinDecoder::default()),
             Box::new(SBCScrubber::new(
-                hasher::AronovichHasher,
+                marline_sketcher::AronovichHasher,
                 clusterer::GraphClusterer::default(),
                 LevenshteinEncoder::default(),
             )),
@@ -42,7 +45,7 @@ mod test {
             HashMap::default(),
             SBCMap::new(GdeltaDecoder::default()),
             Box::new(SBCScrubber::new(
-                hasher::AronovichHasher,
+                marline_sketcher::AronovichHasher,
                 clusterer::GraphClusterer::default(),
                 GdeltaEncoder::default(),
             )),

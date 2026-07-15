@@ -50,7 +50,7 @@ impl Vertex {
 /// # Example
 ///
 /// ```
-/// # use sbc_algorithm::clusterer::GraphClusterer;
+/// # use crate::marline_scrub::clusterer::GraphClusterer;
 ///
 /// let mut clusterer = GraphClusterer::default();
 /// // Use clusterer.clusterize(...) to cluster chunks.
@@ -327,7 +327,8 @@ impl GraphClusterer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SBCMap, SBCScrubber, decoder, encoder, hasher};
+    use crate::{SBCMap, SBCScrubber, decoder, encoder};
+
     use chunkfs::chunkers::{SizeParams, SuperChunker};
     use chunkfs::hashers::Sha256Hasher;
     use chunkfs::{FileSystem, ScrubMeasurements};
@@ -344,7 +345,7 @@ mod tests {
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
-                hasher::AronovichHasher,
+                marline_sketcher::AronovichHasher,
                 GraphClusterer::default(),
                 encoder::GdeltaEncoder::new(false),
             )),

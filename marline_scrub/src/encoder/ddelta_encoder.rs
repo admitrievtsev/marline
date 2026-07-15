@@ -529,9 +529,11 @@ mod test {
         CompressionIsPriority, SpeedIsPriority,
     };
     use crate::encoder::encode_simple_chunk;
-    use crate::hasher::AronovichHash;
+
+    use marline_sketcher::AronovichHash;
+
     use rand::prelude::StdRng;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng, rng};
 
     #[test]
     fn process_target_chunk_with_edelta_should_process_full_match_with_compression_priority() {
@@ -941,7 +943,7 @@ mod test {
 
     #[test]
     fn gear_chunking_should_split_data_into_multiple_chunks() {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut data = vec![0u8; AVERAGE_CHUNK_SIZE * 1000];
         rng.fill(&mut data[..]);
 
@@ -1087,7 +1089,7 @@ mod test {
 
     fn generate_test_data() -> Vec<u8> {
         const TEST_DATA_SIZE: usize = 8192;
-        (0..TEST_DATA_SIZE).map(|_| rng.random()).collect()
+        (0..TEST_DATA_SIZE).map(|_| rng().random()).collect()
     }
 
     fn generate_test_data_deterministic(seed: u64) -> Vec<u8> {

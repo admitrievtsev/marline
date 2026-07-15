@@ -2,6 +2,10 @@
 members = ["marline", "marline_delta", "marline_scrub", "marline_sketcher"]
 resolver = "3"
 
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+
 [workspace.dependencies]
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git" }
 rand = "0.8.5"

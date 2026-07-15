@@ -263,7 +263,7 @@ fn encode_delta_action(action: Action, index: usize, byte_value: u8) -> u32 {
 mod test {
     use super::*;
     use crate::decoder;
-    use crate::hasher::AronovichHash;
+    use marline_sketcher::AronovichHash;
 
     #[test]
     fn test_restore_similarity_chunk_1_byte_diff() {

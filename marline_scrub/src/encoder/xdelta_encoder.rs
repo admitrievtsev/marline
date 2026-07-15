@@ -338,9 +338,9 @@ mod test {
     use super::*;
     use crate::decoder;
     use crate::encoder::encode_simple_chunk;
-    use crate::hasher::AronovichHash;
+    use marline_sketcher::AronovichHash;
     use rand::prelude::StdRng;
-    use rand::{Rng, RngExt, SeedableRng};
+    use rand::{RngExt, SeedableRng};
 
     const TEST_DATA_SIZE: usize = 8192;
 
