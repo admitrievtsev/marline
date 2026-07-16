@@ -5,3 +5,4 @@ pub mod hasher;
 pub mod metadata_manager;
 pub mod pipeline;
 pub mod types;
+pub mod sf_generator;
