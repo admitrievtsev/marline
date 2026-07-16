@@ -355,7 +355,7 @@ mod tests {
         let test_data = generate_test_data();
         let scrub_report = create_scrub_report(test_data);
 
-        let cluster_report = &scrub_report.clusterization_report;
+        let cluster_report = &scrub_report.clusterization_report.unwrap();
         assert!(cluster_report.total_cluster_size > 0);
         assert!(cluster_report.number_of_clusters > 0);
         assert!(cluster_report.number_of_vertices_in_cluster.values().all(|&v| v >= 1));
@@ -368,13 +368,13 @@ mod tests {
         let test_data = generate_test_data();
         let scrub_report = create_scrub_report(test_data);
 
-        let cluster_report = &scrub_report.clusterization_report;
+        let cluster_report = &scrub_report.clusterization_report.unwrap();
 
         for (parent_key, &cluster_size) in &cluster_report.number_of_vertices_in_cluster {
             assert!(cluster_size > 0);
 
             let cluster_points =
-                &scrub_report.clusterization_report.distance_to_vertices_in_cluster[parent_key];
+                &cluster_report.distance_to_vertices_in_cluster[parent_key];
 
             // The parent vertex is ignored.
             assert_eq!(cluster_points.len(), cluster_size - 1);
