@@ -1,13 +1,9 @@
-//! Sketch types used as keys in similarity indexing.
-//!
-//! A sketch compactly represents a data chunk while preserving similarity
-//! information, which makes it suitable as an index key.
+mod feature;
 
-/// A placeholder sketch.
-///
-/// Will hold extracted features for use as an index key.
-#[allow(dead_code)]
-pub(crate) struct Sketch {}
+pub use feature::{FixedSketch, Sketch, Sketch2, Sketch3, Sketch6};
 
-pub mod feature;
-pub mod similarity;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SketchError {
+    EmptySketch,
+    DuplicateElement(u32),
+}

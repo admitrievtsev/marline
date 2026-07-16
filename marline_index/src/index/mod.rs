@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::sketch::Sketch;
+
 mod error;
 
 /// A unique identifier for index entries.
@@ -16,7 +18,7 @@ pub type EntryId = u64;
 /// * [`Self::Value`] — The stored value type.
 /// * [`Self::Error`] — The error type for fallible operations.
 #[allow(dead_code)]
-pub trait SketchKvindex<S: Send + Sync>: Send + Sync {
+pub trait SketchKvindex<S: Send + Sync + Sketch>: Send + Sync {
     /// The type of values stored in the index.
     type Value;
     /// The error type returned by index operations.
@@ -99,7 +101,7 @@ pub struct SearchOptions {
 /// * `V` — The value type.
 #[allow(dead_code)]
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
-pub struct SearchMatch<S: Send + Sync, V: Send + Sync> {
+pub struct SearchMatch<S: Send + Sync + Sketch, V: Send + Sync> {
     pub entry_id: usize,
     pub key: S,
     pub value: Arc<V>,
@@ -181,7 +183,7 @@ pub struct IndexStats {
 /// * `S` — The sketch key type.
 /// * `V` — The value type.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Entry<S: Send + Sync, V: Send + Sync> {
+pub struct Entry<S: Send + Sync + Sketch, V: Send + Sync> {
     pub id: EntryId,
     pub key: S,
     pub value: V,
