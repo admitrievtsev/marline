@@ -347,6 +347,11 @@ where
 
         let running_time = time_start.elapsed();
 
-        Ok(ScrubMeasurements { processed_data, running_time, data_left, clusterization_report })
+        Ok(ScrubMeasurements {
+            processed_data,
+            running_time,
+            data_left,
+            clusterization_report: Some(clusterization_report),
+        })
     }
 }
