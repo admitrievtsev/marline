@@ -1,5 +1,5 @@
 [workspace]
-members = ["marline", "marline_delta", "marline_scrub", "marline_sketcher", "marlin_index", "marline_index/marlin_index"]
+members = ["marline", "marline_delta", "marline_scrub", "marline_sketcher", "marline_index"]
 resolver = "2"
 
 [workspace.package]
@@ -8,15 +8,4 @@ edition = "2021"
 
 [workspace.dependencies]
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git" }
-rand = "0.8.5"
-rayon = "1.10"
-zstd = "0.13"
 thiserror = "2.0.12"
-huffman-compress = "0.6.1"
-bit-vec = "0.6.3"
-log = "0.4.27"
-fasthash = "0.4.0"
-
-
-[profile.release]
-debug = true
