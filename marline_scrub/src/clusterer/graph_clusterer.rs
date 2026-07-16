@@ -373,8 +373,7 @@ mod tests {
         for (parent_key, &cluster_size) in &cluster_report.number_of_vertices_in_cluster {
             assert!(cluster_size > 0);
 
-            let cluster_points =
-                &cluster_report.distance_to_vertices_in_cluster[parent_key];
+            let cluster_points = &cluster_report.distance_to_vertices_in_cluster[parent_key];
 
             // The parent vertex is ignored.
             assert_eq!(cluster_points.len(), cluster_size - 1);
