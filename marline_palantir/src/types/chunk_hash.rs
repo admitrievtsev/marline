@@ -1,7 +1,7 @@
 use super::fingerprint::Fingerprint;
 use super::super_feature::SuperFeature;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChunkHash {
     pub fingerprint: Fingerprint,
     pub super_features: Vec<SuperFeature>,

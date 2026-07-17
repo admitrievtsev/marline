@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Chunk {
     data: Vec<u8>,
 }

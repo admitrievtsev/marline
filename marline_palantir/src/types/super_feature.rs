@@ -3,24 +3,21 @@ use super::chunk::Chunk;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SuperFeature {
     tier_id: u8,
-    hash: u64,
-    block_id: u64,
+    value: u32,
     version_id: u32,
 }
 
 impl SuperFeature {
-    pub fn new(tier_id: u8, hash: u64, block_id: u64, version_id: u32) -> Self {
-        Self { tier_id, hash, block_id, version_id }
+    pub fn new(tier_id: u8, value: u32, version_id: u32) -> Self {
+        Self { tier_id, value, version_id }
     }
     pub fn tier_id(&self) -> u8 {
         self.tier_id
     }
-    pub fn hash(&self) -> u64 {
-        self.hash
+    pub fn value(&self) -> u32 {
+        self.value
     }
-    pub fn block_id(&self) -> u64 {
-        self.block_id
-    }
+    
     pub fn version_id(&self) -> u32 {
         self.version_id
     }

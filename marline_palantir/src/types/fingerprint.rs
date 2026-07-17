@@ -1,6 +1,6 @@
 use super::chunk::Chunk;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Fingerprint {
     hash: [u8; 32],
 }

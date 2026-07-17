@@ -8,3 +8,4 @@ sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true
 log.workspace = true
+chunkfs.workspace = true
