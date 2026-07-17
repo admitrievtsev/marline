@@ -5,6 +5,7 @@ mod error;
 /// A unique identifier for index entries.
 pub type EntryId = u64;
 
+pub type NearestNeighbour<V> = (Arc<V>, usize);
 /// A key-value index with similarity search via sketches.
 ///
 /// # Type Parameters
@@ -24,6 +25,16 @@ pub trait SketchKvindex<S: Send + Sync>: Send + Sync {
 
     /// Returns the number of entries.
     fn len(&self) -> Result<usize, Self::Error>;
+
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        let len = match self.len() {
+            Ok(len) => len,
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        Ok(len == 0)
+    }
 
     /// Looks up a value by key.
     ///
@@ -46,7 +57,7 @@ pub trait SketchKvindex<S: Send + Sync>: Send + Sync {
         &self,
         key: &S,
         search_options: SearchOptions,
-    ) -> Result<Option<(Arc<Self::Value>, usize)>, Self::Error>;
+    ) -> Result<Option<NearestNeighbour<Self::Value>>, Self::Error>;
 
     /// Returns the top `k` closest entries.
     ///
@@ -56,7 +67,7 @@ pub trait SketchKvindex<S: Send + Sync>: Send + Sync {
         key: &S,
         k: usize,
         search_options: SearchOptions,
-    ) -> Result<Vec<(Arc<Self::Value>, usize)>, Self::Error>;
+    ) -> Result<Vec<NearestNeighbour<Self::Value>>, Self::Error>;
 
     /// Removes all entries.
     fn clear(&self) -> Result<(), Self::Error>;
