@@ -5,7 +5,7 @@ use std::hash::Hash;
 ///
 /// Implementations must store elements sorted and unique.
 #[allow(dead_code)]
-pub trait Sketch: Eq + Ord + Hash + Clone + Send + Sync + 'static {
+pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
     /// Iterator over sketch elements. Zero-cost (no heap allocation).
     type Iter<'a>: Iterator<Item = u32> where Self: 'a;
 
@@ -30,7 +30,7 @@ pub trait Sketch: Eq + Ord + Hash + Clone + Send + Sync + 'static {
 
 /// Fixed-size sketch backed by a sorted array of `N` unique `u32` values.
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FixedSketch<const N: usize> {
     items: [u32; N],
 }
