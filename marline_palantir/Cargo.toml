@@ -9,3 +9,5 @@ fasthash.workspace = true
 thiserror.workspace = true
 log.workspace = true
 chunkfs.workspace = true
+rand.workspace = true
+marline_sketcher = {path = "../marline_sketcher"}
