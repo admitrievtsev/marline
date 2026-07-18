@@ -1,5 +1,3 @@
-use super::chunk::Chunk;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SuperFeature {
     tier_id: u8,
@@ -26,28 +24,17 @@ impl SuperFeature {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TierConfig {
-    tier_id: u8,
-    k: u8,
-    s: u8,
+    pub tier_list: Vec<u32>,
 }
 
 impl TierConfig {
-    pub fn new(tier_id: u8, k: u8, s: u8) -> Self {
-        Self { tier_id, k, s }
-    }
-    pub fn tier_id(&self) -> u8 {
-        self.tier_id
-    }
-    pub fn k(&self) -> u8 {
-        self.k
-    }
-    pub fn s(&self) -> u8 {
-        self.s
+    pub fn new(tier_list: Vec<u32>) -> Self {
+        Self { tier_list }
     }
 }
 
 pub trait SuperFeatureGenerator {
-    fn generate(&self, chunk: &Chunk) -> Vec<SuperFeature>;
+    fn generate(&self, chunk: &[u8]) -> Vec<SuperFeature>;
 }

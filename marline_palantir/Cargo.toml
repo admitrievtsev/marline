@@ -8,3 +8,5 @@ sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true
 log.workspace = true
+rand.workspace = true
+marline_sketcher = {path = "../marline_sketcher"}
