@@ -5,6 +5,8 @@
 
 pub use error::IndexError;
 
+use crate::sketch::Sketch;
+
 mod error;
 
 /// A unique identifier for index entries.
