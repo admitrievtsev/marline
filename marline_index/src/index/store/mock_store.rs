@@ -37,27 +37,80 @@ where
             .sketches
             .write()
             .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
-        sketches.entry(hash.clone()).or_insert(sketch.clone());
+        sketches.insert(hash.clone(), sketch.clone());
         Ok(())
     }
 
     fn get_inverted(&self, tier: Tier, sf: u64) -> Result<Vec<H>, IndexError> {
-        todo!()
+        let data = match tier {
+            Tier::One => self.inverted_t1.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Two => self.inverted_t2.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Three => self.inverted_t3.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+        };
+        Ok(data.get(&sf).cloned().unwrap_or_default())
+    }
+
+    fn put_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
+        let mut data = match tier {
+            Tier::One => self.inverted_t1.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Two => self.inverted_t2.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Three => self.inverted_t3.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+        };
+        data.entry(sf).or_default().push(hash.clone());
+        Ok(())
     }
 
     fn len_inverted(&self, tier: Tier) -> Result<usize, IndexError> {
-        todo!()
-    }
-
-    fn add_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
-        todo!()
+        let data = match tier {
+            Tier::One => self.inverted_t1.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Two => self.inverted_t2.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Three => self.inverted_t3.read().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+        };
+        Ok(data.len())
     }
 
     fn remove_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
-        todo!()
+        let mut data = match tier {
+            Tier::One => self.inverted_t1.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Two => self.inverted_t2.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+            Tier::Three => self.inverted_t3.write().map_err(|_| {
+                IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
+            })?,
+        };
+
+        if let Some(hashes) = data.get_mut(&sf) {
+            hashes.retain(|h| h != hash);
+        }
+        Ok(())
     }
 
     fn len_sketches(&self) -> Result<usize, IndexError> {
-        todo!()
+        let data = self
+            .sketches
+            .read()
+            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        Ok(data.len())
     }
 }

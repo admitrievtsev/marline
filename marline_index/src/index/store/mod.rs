@@ -22,7 +22,7 @@ where
 
     /// superfeature → Vec<Hash>
     fn get_inverted(&self, tier: Tier, sf: u64) -> Result<Vec<H>, IndexError>;
-    fn add_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError>;
+    fn put_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError>;
     fn remove_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError>;
 
     ///
