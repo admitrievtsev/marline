@@ -9,7 +9,7 @@ use crate::sketch::Sketch;
 
 pub use error::IndexError;
 mod error;
-
+mod store;
 /// A key-value index with similarity search via sketches.
 ///
 /// # Type Parameters
