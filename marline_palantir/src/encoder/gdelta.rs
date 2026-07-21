@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use super::PalantirEncoder;
 use crate::GEAR;
 
+#[derive(Debug, Default)]
 pub struct GdeltaEncoder;
 
 impl GdeltaEncoder {

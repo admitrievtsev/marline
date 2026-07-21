@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 
-use chunkfs::{
-    ChunkHash, Data, DataContainer, IterableDatabase, Scrub, ScrubMeasurements,
-};
+use chunkfs::{ChunkHash, Data, DataContainer, IterableDatabase, Scrub, ScrubMeasurements};
 
 use crate::encoder::PalantirEncoder;
 use crate::types::{Chunk, SuperFeature, SuperFeatureGenerator};
@@ -16,6 +14,7 @@ pub trait SimilarityIndex {
 }
 
 #[allow(dead_code)]
+#[derive(Default)]
 pub struct StubIndex {
     tier1: HashMap<[u32; 3], BlockId>,
     tier2: HashMap<[u32; 4], BlockId>,
@@ -24,11 +23,7 @@ pub struct StubIndex {
 
 impl StubIndex {
     pub fn new() -> Self {
-        Self {
-            tier1: HashMap::new(),
-            tier2: HashMap::new(),
-            tier3: HashMap::new(),
-        }
+        Self { tier1: HashMap::new(), tier2: HashMap::new(), tier3: HashMap::new() }
     }
 }
 
@@ -52,14 +47,7 @@ pub struct PalantirScrubber<S, I, E> {
 
 impl<S, I, E> PalantirScrubber<S, I, E> {
     pub fn new(sf_gen: S, index: I, encoder: E) -> Self {
-        Self {
-            sf_gen,
-            index,
-            encoder,
-            fp_threshold: 0.9,
-            avg_comp_ratio: 1.0,
-            chunks_processed: 0,
-        }
+        Self { sf_gen, index, encoder, fp_threshold: 0.9, avg_comp_ratio: 1.0, chunks_processed: 0 }
     }
 }
 
@@ -126,4 +114,6 @@ where
             clusterization_report: None,
         })
     }
+
+    // todo: добавить метод update() который свяжет скраббер с метадата менеджером
 }
