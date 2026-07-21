@@ -6,7 +6,7 @@ use chunkfs::{
 };
 
 use crate::encoder::PalantirEncoder;
-use crate::types::{SuperFeature, SuperFeatureGenerator};
+use crate::types::{Chunk, SuperFeature, SuperFeatureGenerator};
 
 pub type BlockId = u32;
 
@@ -87,7 +87,8 @@ where
         for (hash, container) in database.iterator_mut() {
             match container.extract() {
                 Data::Chunk(chunk_data) => {
-                    let super_features = self.sf_gen.generate(chunk_data.as_slice());
+                    let chunk = Chunk::new(chunk_data.clone());
+                    let super_features = self.sf_gen.generate(&chunk);
 
                     match self.index.search(&super_features) {
                         Some(_) => {

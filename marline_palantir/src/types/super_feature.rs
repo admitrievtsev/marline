@@ -1,4 +1,4 @@
-use crate::types::Chunk;
+use super::chunk::Chunk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SuperFeature {
