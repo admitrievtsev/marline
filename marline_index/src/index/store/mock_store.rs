@@ -19,35 +19,45 @@ impl<H, S: Sketch> MockStore<H, S> {
     }
 }
 
+#[allow(unused_variables)]
 impl<H, S: Sketch> Store<H, S> for MockStore<H, S>
 where
     H: Clone + Eq + std::hash::Hash + Send + Sync,
 {
-    fn get_sketch(&self, _hash: &H) -> Result<Option<S>, IndexError> {
+    fn get_sketch(&self, hash: &H) -> Result<Option<S>, IndexError> {
+        let sketches = self
+            .sketches
+            .read()
+            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        Ok(sketches.get(hash).cloned())
+    }
+
+    fn put_sketch(&self, hash: &H, sketch: &S) -> Result<(), IndexError> {
+        let mut sketches = self
+            .sketches
+            .write()
+            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        sketches.entry(hash.clone()).or_insert(sketch.clone());
+        Ok(())
+    }
+
+    fn get_inverted(&self, tier: Tier, sf: u64) -> Result<Vec<H>, IndexError> {
         todo!()
     }
 
-    fn put_sketch(&self, _hash: &H, _sketch: &S) -> Result<(), IndexError> {
+    fn len_inverted(&self, tier: Tier) -> Result<usize, IndexError> {
         todo!()
     }
 
-    fn get_inverted(&self, _tier: Tier, _sf: u64) -> Result<Vec<H>, IndexError> {
+    fn add_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
         todo!()
     }
 
-    fn add_inverted(&self, _tier: Tier, _sf: u64, _hash: &H) -> Result<(), IndexError> {
-        todo!()
-    }
-
-    fn remove_inverted(&self, _tier: Tier, _sf: u64, _hash: &H) -> Result<(), IndexError> {
+    fn remove_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
         todo!()
     }
 
     fn len_sketches(&self) -> Result<usize, IndexError> {
-        todo!()
-    }
-
-    fn len_inverted(&self, _tier: Tier) -> Result<usize, IndexError> {
         todo!()
     }
 }
