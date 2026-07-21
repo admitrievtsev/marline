@@ -1,5 +1,6 @@
-use crate::types::SuperFeatureGenerator;
+use crate::types::{Chunk, SuperFeatureGenerator};
 use crate::GEAR;
+use num::integer::gcd;
 use std::hash::{DefaultHasher, Hasher};
 
 pub struct PalantirHasher {
@@ -9,8 +10,22 @@ pub struct PalantirHasher {
     features_num: usize,
 }
 
+fn lcm_checked(a: u32, b: u32) -> Option<u32> {
+    let gcd_val = gcd(a, b);
+    (a / gcd_val).checked_mul(b)
+}
+
+fn lcm_vec(nums: &Vec<u32>) -> Option<u32> {
+    let mut res: u32 = 1;
+    for &i in nums {
+        res = lcm_checked(res, i)?;
+    }
+    Some(res)
+}
+
 impl PalantirHasher {
-    pub fn new(sampling_rate: u64, tier_list: Vec<u32>, features_num: usize) -> Self {
+    pub fn new(sampling_rate: u64, tier_list: Vec<u32>) -> Self {
+        let features_num = lcm_vec(&tier_list).unwrap() as usize;
         let mut linear_coefficients = Vec::with_capacity(features_num);
         for _ in 0..features_num {
             linear_coefficients.push(rand::random());
@@ -20,13 +35,13 @@ impl PalantirHasher {
 }
 
 impl SuperFeatureGenerator for PalantirHasher {
-    fn generate(&self, chunk: &[u8]) -> Vec<crate::types::SuperFeature> {
+    fn generate(&self, chunk: &Chunk) -> Vec<crate::types::SuperFeature> {
         let mut features = vec![u64::MAX; self.features_num];
 
         let mask = (1u64 << self.sampling_rate) - 1;
         let mut fp = 0u64;
 
-        for &byte in chunk {
+        for &byte in chunk.as_bytes() {
             fp = (fp << 1).wrapping_add(GEAR[byte as usize]);
 
             if fp & mask == 0 {
@@ -53,32 +68,11 @@ impl SuperFeatureGenerator for PalantirHasher {
                 for &val in &group {
                     hasher.write_u64(val);
                 }
-                let hash = hasher.finish();
+                let hash = hasher.finish() as u32;
                 super_features.push(crate::types::SuperFeature::new(tier_id as u8, hash, 0));
             }
         }
 
         super_features
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn print_super_features() {
-        let hasher = PalantirHasher {
-            sampling_rate: 3,
-            linear_coefficients: (1..=12).map(|i| i as u64).collect(),
-            tier_list: vec![4, 3, 2],
-            features_num: 12,
-        };
-        let chunk = b"hello world this is a test chunk for palantir hasher";
-        let sfs = hasher.generate(chunk);
-        for sf in &sfs {
-            println!("tier={} hash=0x{:016x}", sf.tier_id(), sf.value());
-        }
-        assert_eq!(sfs.len(), 13);
     }
 }

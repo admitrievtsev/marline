@@ -8,7 +8,7 @@ sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true
 log.workspace = true
+chunkfs.workspace = true
 rand.workspace = true
 marline_sketcher = {path = "../marline_sketcher"}
-chunkfs.workspace = true
-zstd.workspace = true
+num = "0.4"
