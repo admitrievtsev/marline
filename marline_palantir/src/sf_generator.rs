@@ -54,7 +54,7 @@ impl SuperFeatureGenerator for PalantirHasher {
                     hasher.write_u64(val);
                 }
                 let hash = hasher.finish();
-                super_features.push(crate::types::SuperFeature::new(tier_id as u8, hash, 0, 0));
+                super_features.push(crate::types::SuperFeature::new(tier_id as u8, hash, 0));
             }
         }
 
@@ -77,7 +77,7 @@ mod tests {
         let chunk = b"hello world this is a test chunk for palantir hasher";
         let sfs = hasher.generate(chunk);
         for sf in &sfs {
-            println!("tier={} hash=0x{:016x}", sf.tier_id(), sf.hash());
+            println!("tier={} hash=0x{:016x}", sf.tier_id(), sf.value());
         }
         assert_eq!(sfs.len(), 13);
     }

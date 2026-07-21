@@ -5,7 +5,8 @@ use chunkfs::{
     ChunkHash, Data, DataContainer, IterableDatabase, Scrub, ScrubMeasurements,
 };
 
-use crate::types::{Chunk, Fingerprint, FingerprintGenerator, SuperFeature, SuperFeatureGenerator};
+use crate::encoder::PalantirEncoder;
+use crate::types::{SuperFeature, SuperFeatureGenerator};
 
 pub type BlockId = u32;
 
@@ -40,26 +41,41 @@ impl SimilarityIndex for StubIndex {
 }
 
 #[allow(dead_code)]
-pub struct PalantirScrubber<F, S, I> {
-    fingerprint_gen: F,
+pub struct PalantirScrubber<S, I, E> {
     sf_gen: S,
     index: I,
-    // todo: encoder
+    encoder: E,
+    fp_threshold: f64,
+    avg_comp_ratio: f64,
+    chunks_processed: u64,
 }
 
-impl<CDCHash, B, F, S, I> Scrub<CDCHash, B, Fingerprint, HashMap<Fingerprint, Vec<u8>>>
-    for PalantirScrubber<F, S, I>
+impl<S, I, E> PalantirScrubber<S, I, E> {
+    pub fn new(sf_gen: S, index: I, encoder: E) -> Self {
+        Self {
+            sf_gen,
+            index,
+            encoder,
+            fp_threshold: 0.9,
+            avg_comp_ratio: 1.0,
+            chunks_processed: 0,
+        }
+    }
+}
+
+impl<CDCHash, B, S, I, E> Scrub<CDCHash, B, CDCHash, HashMap<CDCHash, Vec<u8>>>
+    for PalantirScrubber<S, I, E>
 where
     CDCHash: ChunkHash,
-    B: IterableDatabase<CDCHash, DataContainer<Fingerprint>>,
-    F: FingerprintGenerator,
+    B: IterableDatabase<CDCHash, DataContainer<CDCHash>>,
     S: SuperFeatureGenerator,
     I: SimilarityIndex,
+    E: PalantirEncoder,
 {
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut HashMap<Fingerprint, Vec<u8>>,
+        target_map: &mut HashMap<CDCHash, Vec<u8>>,
     ) -> io::Result<ScrubMeasurements>
     where
         CDCHash: 'a,
@@ -68,23 +84,35 @@ where
         let mut processed_data = 0;
         let mut data_left = 0;
 
-        for (_hash, container) in database.iterator_mut() {
+        for (hash, container) in database.iterator_mut() {
             match container.extract() {
                 Data::Chunk(chunk_data) => {
-                    let chunk = Chunk::new(chunk_data.clone());
-                    let fingerprint = self.fingerprint_gen.generate(&chunk);
-                    let super_features = self.sf_gen.generate(&chunk);
+                    let super_features = self.sf_gen.generate(chunk_data.as_slice());
 
-                    if let Some(_parent_id) = self.index.search(&super_features) {
-                        // TODO: delta encode
-                        data_left += chunk_data.len();
-                    } else {
-                        target_map.insert(fingerprint, chunk_data.clone());
-                        processed_data += chunk_data.len();
+                    match self.index.search(&super_features) {
+                        Some(_) => {
+                            // TODO: get base_data from index/storage, encode delta
+                            //   let delta = self.encoder.encode(chunk_data, base_data);
+                            //   let delta_zst = zstd::encode_all(&delta[..], 0).unwrap();
+                            //   let simple_zst = zstd::encode_all(chunk_data, 0).unwrap();
+                            //   let ratio = delta_zst.len() as f64 / simple_zst.len() as f64;
+                            //   if ratio < self.fp_threshold {  // true positive
+                            //       target_map.insert(hash.clone(), delta);
+                            //       self.avg_comp_ratio = self.avg_comp_ratio * 0.95 + ratio * 0.05;
+                            //   } else {  // false positive → store as simple
+                            //       target_map.insert(hash.clone(), chunk_data.clone());
+                            //   }
+                            data_left += chunk_data.len();
+                        }
+                        None => {
+                            target_map.insert(hash.clone(), chunk_data.clone());
+                            processed_data += chunk_data.len();
+                        }
                     }
 
                     self.index.insert(&super_features, 0);
-                    container.make_target(vec![fingerprint]);
+                    container.make_target(vec![hash.clone()]);
+                    self.chunks_processed += 1;
                 }
                 Data::TargetChunk(_) => {}
             }
