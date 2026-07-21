@@ -16,4 +16,7 @@ pub enum IndexError {
     /// An internal invariant was violated.
     #[error("internal invariant violation: {0}")]
     InternalInvariantViolation(String),
+
+    #[error("invalid key")]
+    InvalidKey,
 }

@@ -6,6 +6,7 @@
 pub use error::IndexError;
 
 mod error;
+mod store;
 
 /// A unique identifier for index entries.
 pub type EntryId = u64;
