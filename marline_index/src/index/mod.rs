@@ -10,6 +10,7 @@ use crate::sketch::Sketch;
 pub use error::IndexError;
 mod error;
 mod store;
+mod palantir_index;
 /// A key-value index with similarity search via sketches.
 ///
 /// # Type Parameters
@@ -45,4 +46,6 @@ pub trait SketchKVindex<S: Send + Sync + Sketch>: Send + Sync {
 
     /// Removes all entries.
     fn clear(&self) -> Result<(), Self::Error>;
+
+    // TODO: Add filter function
 }
