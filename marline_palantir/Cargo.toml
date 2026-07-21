@@ -11,3 +11,4 @@ log.workspace = true
 chunkfs.workspace = true
 rand.workspace = true
 marline_sketcher = {path = "../marline_sketcher"}
+num = "0.4"

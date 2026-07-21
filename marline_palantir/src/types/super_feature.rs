@@ -1,3 +1,5 @@
+use crate::types::Chunk;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SuperFeature {
     tier_id: u8,
@@ -15,7 +17,7 @@ impl SuperFeature {
     pub fn value(&self) -> u32 {
         self.value
     }
-    
+
     pub fn version_id(&self) -> u32 {
         self.version_id
     }
@@ -33,5 +35,5 @@ impl TierConfig {
 }
 
 pub trait SuperFeatureGenerator {
-    fn generate(&self, chunk: &[u8]) -> Vec<SuperFeature>;
+    fn generate(&self, chunk: &Chunk) -> Vec<SuperFeature>;
 }
