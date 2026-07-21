@@ -5,9 +5,10 @@
 
 pub use error::IndexError;
 
+use crate::sketch::Sketch;
+
 mod error;
 mod store;
-
 /// A unique identifier for index entries.
 pub type EntryId = u64;
 
@@ -22,7 +23,8 @@ pub type EntryId = u64;
 /// * [`Self::Value`] — The stored value type. Must implement [`Clone`],
 ///   [`Send`], and [`Sync`] so that [`get`](Self::get) can return an owned
 ///   value.
-pub trait SketchKvindex<S: Send + Sync>: Send + Sync {
+#[allow(dead_code)]
+pub trait SketchKvindex<S: Send + Sync + Sketch>: Send + Sync {
     /// The type of values stored in the index.
     type Value: Clone + Send + Sync;
 
@@ -105,8 +107,9 @@ pub struct SearchOptions {
 ///
 /// * `S` — The sketch key type.
 /// * `V` — The value type.
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SearchResult<S: Send + Sync, V: Send + Sync> {
+pub struct SearchResult<S: Send + Sync + Sketch, V: Send + Sync> {
     pub entry_id: EntryId,
     pub key: S,
     pub value: V,
@@ -184,7 +187,7 @@ pub struct IndexStats {
 /// * `S` — The sketch key type.
 /// * `V` — The value type.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry<S: Send + Sync, V: Send + Sync> {
+pub struct Entry<S: Send + Sync + Sketch, V: Send + Sync> {
     pub id: EntryId,
     pub key: S,
     pub value: V,
