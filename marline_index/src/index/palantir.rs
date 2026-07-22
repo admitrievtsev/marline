@@ -6,18 +6,34 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
+/// Bypass API — direct storage access that skips search logic.
+///
+/// Extends [`SketchKVindex`] with low-level operations that interact with
+/// the underlying storage directly, bypassing the inverted index updates
+/// and similarity search logic.
 #[allow(dead_code)]
-pub trait SketchKVPalantir<K, S: Send + Sync + Sketch>: Send + Sync + SketchKVindex<K, S>
+pub trait SketchKVPalantir<K, S: Send + Sync + Sketch>:
+    Send + Sync + SketchKVindex<K, S>
 where
     K: Clone + Eq + Hash + Send + Sync,
 {
-    fn get_db(&self) -> Result<Option<S>, Self::Error>;
+    /// Direct sketch lookup by hash, bypassing search logic.
+    fn get_db(&self, key: &K) -> Result<Option<S>, Self::Error>;
 
-    fn put_db(&self, key: &K) -> Result<(), Self::Error>;
+    /// Direct sketch insert, bypassing inverted index updates.
+    fn put_db(&self, key: &K, sketch: S) -> Result<(), Self::Error>;
 
-    fn top_k_db(&self, key: &K) -> Result<Vec<(K, f64)>, Self::Error>;
+    /// Returns all hashes from a specific tier that share the given superfeature.
+    fn get_inverted_db(&self, tier: Tier, sf: u32) -> Result<Vec<K>, Self::Error>;
 }
 
+/// Maps a sketch size to its corresponding Palantir tier.
+///
+/// | Sketch size | Tier  | Description            |
+/// |-------------|-------|------------------------|
+/// | 3           | One   | Coarse-grained search  |
+/// | 4           | Two   | Medium-grained search  |
+/// | 6           | Three | Fine-grained search    |
 #[allow(dead_code)]
 fn tier_for_sketch_size(len: usize) -> Result<Tier, IndexError> {
     match len {
@@ -28,6 +44,29 @@ fn tier_for_sketch_size(len: usize) -> Result<Tier, IndexError> {
     }
 }
 
+/// A Palantir-style similarity index.
+///
+/// [`PalantirIndex`] implements the [`SketchKVindex`] trait over a generic
+/// [`Store`] backend. It uses an **inverted index** organized into three
+/// tiers of different superfeature granularity (coarse, medium, fine) to
+/// efficiently find similar chunks.
+///
+/// # Algorithm
+///
+/// On [`put`](SketchKVindex::put), the sketch is written to the store and
+/// each superfeature is added to the appropriate tier's inverted index
+/// (the tier is determined by [`tier_for_sketch_size`]).
+///
+/// On [`top_k`](SketchKVindex::top_k), the query sketch's superfeatures are
+/// looked up in the inverted index. Candidate hashes are scored by overlap,
+/// and the top candidates are then scored by exact Jaccard similarity using
+/// [`SimilarityScore`] before being returned.
+///
+/// # Type Parameters
+///
+/// * `K` — The key type (chunk hash). Must be [`Clone`] + [`Eq`] + [`Hash`].
+/// * `S` — The sketch type. Must implement [`Sketch`].
+/// * `ST` — The storage backend. Must implement [`Store`]`<K, S>`.
 #[allow(dead_code)]
 pub struct PalantirIndex<K, S, ST>
 where
@@ -36,7 +75,6 @@ where
     ST: Store<K, S>,
 {
     store: ST,
-
     _phantom: PhantomData<(K, S)>,
 }
 
@@ -46,6 +84,7 @@ where
     S: Sketch,
     ST: Store<K, S>,
 {
+    /// Creates a new `PalantirIndex` over the given storage backend.
     #[allow(dead_code)]
     pub fn new(store: ST) -> Self {
         Self { store, _phantom: PhantomData }
@@ -62,6 +101,10 @@ where
 
     fn len(&self) -> Result<usize, Self::Error> {
         self.store.len_sketches()
+    }
+
+    fn lookup(&self, key: &K) -> Result<Option<S>, Self::Error> {
+        self.store.get_sketch(key)
     }
 
     fn get(&self, key: &S) -> Result<Option<K>, Self::Error> {
@@ -116,6 +159,25 @@ where
 
     fn clear(&self) -> Result<(), Self::Error> {
         todo!("clear requires store to implement clear")
+    }
+}
+
+impl<K, S, ST> SketchKVPalantir<K, S> for PalantirIndex<K, S, ST>
+where
+    K: Clone + Eq + Hash + Send + Sync,
+    S: Sketch,
+    ST: Store<K, S>,
+{
+    fn get_db(&self, key: &K) -> Result<Option<S>, Self::Error> {
+        self.store.get_sketch(key)
+    }
+
+    fn put_db(&self, key: &K, sketch: S) -> Result<(), Self::Error> {
+        self.store.put_sketch(key, &sketch)
+    }
+
+    fn get_inverted_db(&self, tier: Tier, sf: u32) -> Result<Vec<K>, Self::Error> {
+        self.store.get_inverted(tier, sf)
     }
 }
 
