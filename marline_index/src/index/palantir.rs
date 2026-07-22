@@ -12,8 +12,7 @@ use std::marker::PhantomData;
 /// the underlying storage directly, bypassing the inverted index updates
 /// and similarity search logic.
 #[allow(dead_code)]
-pub trait SketchKVPalantir<K, S: Send + Sync + Sketch>:
-    Send + Sync + SketchKVindex<K, S>
+pub trait SketchKVPalantir<K, S: Send + Sync + Sketch>: Send + Sync + SketchKVindex<K, S>
 where
     K: Clone + Eq + Hash + Send + Sync,
 {
@@ -162,24 +161,25 @@ where
     }
 }
 
-impl<K, S, ST> SketchKVPalantir<K, S> for PalantirIndex<K, S, ST>
-where
-    K: Clone + Eq + Hash + Send + Sync,
-    S: Sketch,
-    ST: Store<K, S>,
-{
-    fn get_db(&self, key: &K) -> Result<Option<S>, Self::Error> {
-        self.store.get_sketch(key)
-    }
+// TODO replace this implementation with RocksDB mock
+// impl<K, S, ST> SketchKVPalantir<K, S> for PalantirIndex<K, S, ST>
+// where
+//     K: Clone + Eq + Hash + Send + Sync,
+//     S: Sketch,
+//     ST: Store<K, S>,
+// {
+//     fn get_db(&self, key: &K) -> Result<Option<S>, Self::Error> {
+//         self.store.get_sketch(key)
+//     }
 
-    fn put_db(&self, key: &K, sketch: S) -> Result<(), Self::Error> {
-        self.store.put_sketch(key, &sketch)
-    }
+//     fn put_db(&self, key: &K, sketch: S) -> Result<(), Self::Error> {
+//         self.store.put_sketch(key, &sketch)
+//     }
 
-    fn get_inverted_db(&self, tier: Tier, sf: u32) -> Result<Vec<K>, Self::Error> {
-        self.store.get_inverted(tier, sf)
-    }
-}
+//     fn get_inverted_db(&self, tier: Tier, sf: u32) -> Result<Vec<K>, Self::Error> {
+//         self.store.get_inverted(tier, sf)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

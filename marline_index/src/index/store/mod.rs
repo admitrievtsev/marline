@@ -71,4 +71,6 @@ where
     /// Returns the number of distinct superfeatures in the given tier's inverted index.
     #[allow(dead_code)]
     fn len_inverted(&self, tier: Tier) -> Result<usize, IndexError>;
+
+    //fn clear()
 }
