@@ -4,6 +4,14 @@ use crate::sketch::Sketch;
 use std::collections::HashMap;
 use std::sync::RwLock;
 
+/// In-memory implementation of [`Store`] backed by [`RwLock`]-protected [`HashMap`]s.
+///
+/// `IndexStorage` provides a fully functional in-memory backend suitable for
+/// testing and prototyping. It uses three separate inverted indices, one per
+/// [`Tier`], and a single sketches map.
+///
+/// Thread safety is provided by `RwLock`, allowing concurrent reads and
+/// exclusive writes.
 #[allow(dead_code)]
 pub struct IndexStorage<H, S: Sketch> {
     sketches: RwLock<HashMap<H, S>>,
@@ -14,6 +22,7 @@ pub struct IndexStorage<H, S: Sketch> {
 
 #[allow(dead_code)]
 impl<H, S: Sketch> IndexStorage<H, S> {
+    /// Creates an empty `IndexStorage`.
     pub fn new() -> Self {
         Self {
             sketches: RwLock::new(HashMap::new()),
@@ -24,7 +33,6 @@ impl<H, S: Sketch> IndexStorage<H, S> {
     }
 }
 
-#[allow(unused_variables)]
 impl<H, S: Sketch> Store<H, S> for IndexStorage<H, S>
 where
     H: Clone + Eq + std::hash::Hash + Send + Sync,

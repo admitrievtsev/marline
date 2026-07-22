@@ -1,56 +1,78 @@
+//! Sketch data types for similarity search.
+//!
+//! This module defines the [`Sketch`] trait and its fixed-size
+//! implementation [`FixedSketch<N>`], which represent compact fingerprints
+//! of chunk contents. Sketches are sorted arrays of unique `u32` elements
+//! that preserve similarity — similar chunks produce similar sketches.
+
 use std::hash::Hash;
 
 pub mod similarity;
 pub use similarity::SimilarityScore;
 
+/// Errors that can occur when creating a [`FixedSketch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SketchError {
+    /// The sketch has zero elements (empty array provided).
     EmptySketch,
+    /// The input contains duplicate values.
     DuplicateElement(u32),
 }
 
 /// Trait for a fixed-size set of `u32` elements used in similarity search.
 ///
-/// Implementations must store elements sorted and unique.
-#[allow(dead_code)]
+/// Implementations must store elements sorted and free of duplicates.
+/// The trait provides O(N) set operations such as [`intersection_size`](Sketch::intersection_size)
+/// and O(log N) membership checking via [`contains`](Sketch::contains).
 pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
-    /// Iterator over sketch elements. Zero-cost (no heap allocation).
+    /// Iterator over sketch elements. Produces elements in sorted order.
     type Iter<'a>: Iterator<Item = u32>
     where
         Self: 'a;
 
-    /// Number of elements in the sketch.
+    /// Returns the number of elements in the sketch.
     fn len(&self) -> usize;
 
     /// Returns `true` if the sketch is empty.
     fn is_empty(&self) -> bool;
 
-    /// Returns an iterator over the elements.
+    /// Iterates over the sketch elements in sorted order.
     fn iter(&self) -> Self::Iter<'_>;
 
-    /// Returns elements as a contiguous slice.
+    /// Returns the sketch elements as a contiguous slice.
     fn as_slice(&self) -> &[u32];
 
-    /// Number of elements present in both sketches. O(N), zero allocations.
+    /// Returns the number of elements present in both sketches. O(N).
     fn intersection_size(&self, other: &Self) -> usize;
 
-    /// Checks if the sketch contains a value. O(log N).
+    /// Returns `true` if the sketch contains the given value. O(log N).
     fn contains(&self, value: u32) -> bool;
 }
 
 /// Fixed-size sketch backed by a sorted array of `N` unique `u32` values.
-#[allow(dead_code)]
+///
+/// [`FixedSketch`] is the primary implementation of the [`Sketch`] trait.
+/// It stores elements in a `[u32; N]` array, sorted at construction time.
+///
+/// # Type Parameters
+///
+/// * `N` — The number of elements in the sketch. Supported values: 3, 4, 6.
+///   (Aliases [`Sketch3`], [`Sketch4`], [`Sketch6`] are provided.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FixedSketch<const N: usize> {
     items: [u32; N],
 }
 
-#[allow(dead_code)]
 impl<const N: usize> FixedSketch<N> {
-    /// Creates a sketch from an array. Sorts elements, rejects duplicates.
+    /// Creates a new `FixedSketch` from an array.
     ///
-    /// Returns [`SketchError::EmptySketch`] if `N == 0`,
-    /// [`SketchError::DuplicateElement`] if duplicates exist.
+    /// The input is sorted automatically. Returns an error if the array
+    /// contains duplicates or if `N = 0`.
+    ///
+    /// # Errors
+    ///
+    /// - [`SketchError::EmptySketch`] if `N == 0`.
+    /// - [`SketchError::DuplicateElement`] if any duplicates are found.
     pub fn new(mut items: [u32; N]) -> Result<Self, SketchError> {
         if N == 0 {
             return Err(SketchError::EmptySketch);
@@ -65,7 +87,7 @@ impl<const N: usize> FixedSketch<N> {
         Ok(Self { items })
     }
 
-    /// Returns elements as a fixed-size array reference.
+    /// Returns the sketch elements as a fixed-size array reference.
     pub fn as_array(&self) -> &[u32; N] {
         &self.items
     }
@@ -115,16 +137,13 @@ impl<const N: usize> Sketch for FixedSketch<N> {
     }
 }
 
-/// Alias for a 2-element sketch.
-#[allow(dead_code)]
+/// A 3-element sketch (Palantir Tier-1, coarse-grained).
 pub type Sketch3 = FixedSketch<3>;
 
-/// Alias for a 3-element sketch.
-#[allow(dead_code)]
+/// A 4-element sketch (Palantir Tier-2, medium-grained).
 pub type Sketch4 = FixedSketch<4>;
 
-/// Alias for a 6-element sketch.
-#[allow(dead_code)]
+/// A 6-element sketch (Palantir Tier-3, fine-grained).
 pub type Sketch6 = FixedSketch<6>;
 
 #[cfg(test)]
