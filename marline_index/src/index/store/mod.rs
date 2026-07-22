@@ -1,7 +1,7 @@
 use crate::index::error::IndexError;
 use crate::sketch::Sketch;
 
-mod mock_store;
+pub mod index_storage;
 
 #[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

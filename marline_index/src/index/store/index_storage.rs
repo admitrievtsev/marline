@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 #[allow(dead_code)]
-pub struct MockStore<H, S: Sketch> {
+pub struct IndexStorage<H, S: Sketch> {
     sketches: RwLock<HashMap<H, S>>,
     inverted_t1: RwLock<HashMap<u32, Vec<H>>>,
     inverted_t2: RwLock<HashMap<u32, Vec<H>>>,
@@ -13,7 +13,7 @@ pub struct MockStore<H, S: Sketch> {
 }
 
 #[allow(dead_code)]
-impl<H, S: Sketch> MockStore<H, S> {
+impl<H, S: Sketch> IndexStorage<H, S> {
     pub fn new() -> Self {
         Self {
             sketches: RwLock::new(HashMap::new()),
@@ -25,7 +25,7 @@ impl<H, S: Sketch> MockStore<H, S> {
 }
 
 #[allow(unused_variables)]
-impl<H, S: Sketch> Store<H, S> for MockStore<H, S>
+impl<H, S: Sketch> Store<H, S> for IndexStorage<H, S>
 where
     H: Clone + Eq + std::hash::Hash + Send + Sync,
 {
@@ -125,7 +125,7 @@ mod tests {
     use super::*;
     use crate::sketch::FixedSketch;
 
-    type Mock = MockStore<u64, FixedSketch<6>>;
+    type Mock = IndexStorage<u64, FixedSketch<6>>;
 
     fn make_sketch(vals: [u32; 6]) -> FixedSketch<6> {
         FixedSketch::new(vals).unwrap()
