@@ -117,11 +117,11 @@ impl<const N: usize> Sketch for FixedSketch<N> {
 
 /// Alias for a 2-element sketch.
 #[allow(dead_code)]
-pub type Sketch2 = FixedSketch<2>;
+pub type Sketch3 = FixedSketch<3>;
 
 /// Alias for a 3-element sketch.
 #[allow(dead_code)]
-pub type Sketch3 = FixedSketch<3>;
+pub type Sketch4 = FixedSketch<4>;
 
 /// Alias for a 6-element sketch.
 #[allow(dead_code)]
@@ -177,8 +177,8 @@ mod tests {
     #[test]
     fn len_returns_n() {
         assert_eq!(Sketch6::new([1, 2, 3, 4, 5, 6]).unwrap().len(), 6);
+        assert_eq!(Sketch4::new([1, 2, 3, 4]).unwrap().len(), 4);
         assert_eq!(Sketch3::new([1, 2, 3]).unwrap().len(), 3);
-        assert_eq!(Sketch2::new([1, 2]).unwrap().len(), 2);
     }
 
     #[test]

@@ -9,8 +9,8 @@ use crate::sketch::Sketch;
 
 pub use error::IndexError;
 mod error;
+mod palantir;
 mod store;
-mod palantir_index;
 /// A key-value index with similarity search via sketches.
 ///
 /// # Type Parameters

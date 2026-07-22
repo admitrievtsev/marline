@@ -7,9 +7,9 @@ use std::sync::RwLock;
 #[allow(dead_code)]
 pub struct MockStore<H, S: Sketch> {
     sketches: RwLock<HashMap<H, S>>,
-    inverted_t1: RwLock<HashMap<u64, Vec<H>>>,
-    inverted_t2: RwLock<HashMap<u64, Vec<H>>>,
-    inverted_t3: RwLock<HashMap<u64, Vec<H>>>,
+    inverted_t1: RwLock<HashMap<u32, Vec<H>>>,
+    inverted_t2: RwLock<HashMap<u32, Vec<H>>>,
+    inverted_t3: RwLock<HashMap<u32, Vec<H>>>,
 }
 
 #[allow(dead_code)]
@@ -46,7 +46,7 @@ where
         Ok(())
     }
 
-    fn get_inverted(&self, tier: Tier, sf: u64) -> Result<Vec<H>, IndexError> {
+    fn get_inverted(&self, tier: Tier, sf: u32) -> Result<Vec<H>, IndexError> {
         let data = match tier {
             Tier::One => self.inverted_t1.read().map_err(|_| {
                 IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
@@ -61,7 +61,7 @@ where
         Ok(data.get(&sf).cloned().unwrap_or_default())
     }
 
-    fn put_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
+    fn put_inverted(&self, tier: Tier, sf: u32, hash: &H) -> Result<(), IndexError> {
         let mut data = match tier {
             Tier::One => self.inverted_t1.write().map_err(|_| {
                 IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
@@ -92,7 +92,7 @@ where
         Ok(data.len())
     }
 
-    fn remove_inverted(&self, tier: Tier, sf: u64, hash: &H) -> Result<(), IndexError> {
+    fn remove_inverted(&self, tier: Tier, sf: u32, hash: &H) -> Result<(), IndexError> {
         let mut data = match tier {
             Tier::One => self.inverted_t1.write().map_err(|_| {
                 IndexError::InternalInvariantViolation(String::from("rwlock poisoned"))
