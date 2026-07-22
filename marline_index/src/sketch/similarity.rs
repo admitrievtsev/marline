@@ -32,6 +32,13 @@ impl SimilarityScore {
     pub fn new(intersection: usize, size: usize) -> Self {
         SimilarityScore { intersection, union: size * 2 - intersection }
     }
+
+    /// Creates a score for two sketches of potentially different sizes.
+    ///
+    /// The union is computed as `len_a + len_b - intersection`.
+    pub fn new_from_two(intersection: usize, len_a: usize, len_b: usize) -> Self {
+        SimilarityScore { intersection, union: len_a + len_b - intersection }
+    }
 }
 
 #[cfg(test)]
@@ -80,5 +87,21 @@ mod tests {
     fn jaccard_similarity_zero_union_returns_zero() {
         let score = SimilarityScore { intersection: 0, union: 0 };
         assert!((score.jaccard_similarity() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn new_from_two_different_sizes() {
+        let score = SimilarityScore::new_from_two(3, 4, 5);
+        // union = 4 + 5 - 3 = 6
+        assert_eq!(score.union, 6);
+        assert_eq!(score.intersection, 3);
+    }
+
+    #[test]
+    fn new_from_two_same_sizes() {
+        let from_two = SimilarityScore::new_from_two(5, 10, 10);
+        let from_one = SimilarityScore::new(5, 10);
+        assert_eq!(from_two.union, from_one.union);
+        assert_eq!(from_two.intersection, from_one.intersection);
     }
 }
