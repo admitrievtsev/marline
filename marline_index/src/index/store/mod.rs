@@ -1,76 +1,69 @@
-//! Storage layer for the Palantir index.
+//! Storage traits and in-memory backend for sketch indexes.
 //!
-//! This module defines the [`Store`] trait — the abstract storage interface
-//! that separates index logic from the backing database. In-memory
-//! [`IndexStorage`] is provided for testing; a production RocksDB backend
-//! can be added by implementing [`Store`] on the RocksDB wrapper.
+//! Storage is intentionally independent from any product-specific tiering or
+//! retention policy. It stores sketches by key and posting lists by feature.
 
 use crate::index::error::IndexError;
 use crate::sketch::Sketch;
 
 pub mod index_storage;
+pub use index_storage::IndexStorage;
 
-/// Palantir superfeature tiers.
-///
-/// A chunk's sketch is placed into one of three inverted-index tiers
-/// based on its sketch size:
-///
-/// | Tier  | Sketch size | Granularity | Retention |
-/// |-------|-------------|-------------|-----------|
-/// | `One`    | 3           | Coarse      | All versions |
-/// | `Two`    | 4           | Medium      | Last N versions |
-/// | `Three`  | 6           | Fine        | Last M versions |
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Tier {
-    One,
-    Two,
-    Three,
-}
-
-/// Abstract storage interface for sketch and inverted-index data.
-///
-/// `Store` is the low-level persistence layer used by [`PalantirIndex`] to
-/// read and write sketches and superfeature posting lists.
-///
-/// Implementations handle thread safety internally (e.g., via `RwLock`).
-///
-/// # Type Parameters
-///
-/// * `H` — The hash type used as the primary key for entries.
-/// * `S` — The sketch type stored as the value.
-///
-/// # Operations
-///
-/// - **Sketches**: `get_sketch` / `put_sketch` for hash → sketch storage.
-/// - **Inverted index**: `get_inverted` / `put_inverted` / `remove_inverted`
-///   for superfeature → list-of-hashes mappings, partitioned by [`Tier`].
-/// - **Counts**: `len_sketches` / `len_inverted` for statistics.
-pub trait Store<H, S: Sketch>: Send + Sync
+/// Storage for direct key -> sketch records.
+pub trait SketchStorage<K, S: Sketch>: Send + Sync
 where
-    H: Clone + Send + Sync,
+    K: Clone + Send + Sync,
 {
-    /// Returns the sketch stored for the given hash, or `None`.
-    fn get_sketch(&self, hash: &H) -> Result<Option<S>, IndexError>;
+    /// Returns the sketch stored for the given key, or `None`.
+    fn get_sketch(&self, key: &K) -> Result<Option<S>, IndexError>;
 
-    /// Stores the sketch under the given hash.
-    fn put_sketch(&self, hash: &H, sketch: &S) -> Result<(), IndexError>;
+    /// Stores the sketch and returns the previous sketch for the key, if any.
+    fn put_sketch(&self, key: K, sketch: S) -> Result<Option<S>, IndexError>;
 
-    /// Returns all hashes that share the given superfeature in the tier.
-    fn get_inverted(&self, tier: Tier, sf: u32) -> Result<Vec<H>, IndexError>;
+    /// Removes the sketch stored for the key, if any.
+    fn remove_sketch(&self, key: &K) -> Result<Option<S>, IndexError>;
 
-    /// Adds a hash to the posting list for `(tier, sf)`.
-    fn put_inverted(&self, tier: Tier, sf: u32, hash: &H) -> Result<(), IndexError>;
-
-    /// Removes a hash from the posting list for `(tier, sf)`.
-    #[allow(dead_code)]
-    fn remove_inverted(&self, tier: Tier, sf: u32, hash: &H) -> Result<(), IndexError>;
-
-    /// Returns the total number of sketches stored.
+    /// Returns the number of sketches stored.
     fn len_sketches(&self) -> Result<usize, IndexError>;
 
-    /// Returns the number of distinct superfeatures in the given tier's inverted index.
-    #[allow(dead_code)]
-    fn len_inverted(&self, tier: Tier) -> Result<usize, IndexError>;
+    /// Removes all sketches.
+    fn clear_sketches(&self) -> Result<(), IndexError>;
+}
 
-    //fn clear()
+/// Storage for feature -> posting-list records.
+pub trait InvertedStorage<K, F>: Send + Sync
+where
+    K: Clone + Send + Sync,
+    F: Copy + Send + Sync,
+{
+    /// Returns all keys that contain the feature.
+    fn posting_list(&self, feature: F) -> Result<Vec<K>, IndexError>;
+
+    /// Adds the key to the feature's posting list.
+    fn insert_posting(&self, feature: F, key: K) -> Result<(), IndexError>;
+
+    /// Removes the key from the feature's posting list.
+    fn remove_posting(&self, feature: F, key: &K) -> Result<(), IndexError>;
+
+    /// Returns the number of distinct indexed features.
+    fn len_postings(&self) -> Result<usize, IndexError>;
+
+    /// Removes all posting lists.
+    fn clear_postings(&self) -> Result<(), IndexError>;
+}
+
+/// Complete storage backend required by [`crate::index::InvertedSketchIndex`].
+pub trait Store<K, S>: SketchStorage<K, S> + InvertedStorage<K, S::Feature>
+where
+    K: Clone + Send + Sync,
+    S: Sketch,
+{
+}
+
+impl<K, S, T> Store<K, S> for T
+where
+    K: Clone + Send + Sync,
+    S: Sketch,
+    T: SketchStorage<K, S> + InvertedStorage<K, S::Feature>,
+{
 }

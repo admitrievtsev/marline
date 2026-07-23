@@ -1,8 +1,8 @@
 //! Sketch data types for similarity search.
 //!
 //! This module defines the [`Sketch`] trait and its fixed-size
-//! implementation [`FixedSketch<N>`], which represent compact fingerprints
-//! of chunk contents. Sketches are sorted arrays of unique `u32` elements
+//! implementation [`FixedSketch<F, N>`], which represent compact fingerprints
+//! of items. Sketches are sorted arrays of unique feature elements
 //! that preserve similarity — similar chunks produce similar sketches.
 
 use std::hash::Hash;
@@ -12,21 +12,24 @@ pub use similarity::SimilarityScore;
 
 /// Errors that can occur when creating a [`FixedSketch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SketchError {
+pub enum SketchError<F = ()> {
     /// The sketch has zero elements (empty array provided).
     EmptySketch,
     /// The input contains duplicate values.
-    DuplicateElement(u32),
+    DuplicateElement(F),
 }
 
-/// Trait for a fixed-size set of `u32` elements used in similarity search.
+/// Trait for a fixed-size set of features used in similarity search.
 ///
 /// Implementations must store elements sorted and free of duplicates.
 /// The trait provides O(N) set operations such as [`intersection_size`](Sketch::intersection_size)
 /// and O(log N) membership checking via [`contains`](Sketch::contains).
 pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
+    /// Feature element stored in the sketch.
+    type Feature: Copy + Ord + Eq + Hash + Send + Sync + 'static;
+
     /// Iterator over sketch elements. Produces elements in sorted order.
-    type Iter<'a>: Iterator<Item = u32>
+    type Iter<'a>: Iterator<Item = Self::Feature>
     where
         Self: 'a;
 
@@ -40,30 +43,33 @@ pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Returns the sketch elements as a contiguous slice.
-    fn as_slice(&self) -> &[u32];
+    fn as_slice(&self) -> &[Self::Feature];
 
     /// Returns the number of elements present in both sketches. O(N).
     fn intersection_size(&self, other: &Self) -> usize;
 
     /// Returns `true` if the sketch contains the given value. O(log N).
-    fn contains(&self, value: u32) -> bool;
+    fn contains(&self, value: Self::Feature) -> bool;
 }
 
-/// Fixed-size sketch backed by a sorted array of `N` unique `u32` values.
+/// Fixed-size sketch backed by a sorted array of `N` unique feature values.
 ///
 /// [`FixedSketch`] is the primary implementation of the [`Sketch`] trait.
-/// It stores elements in a `[u32; N]` array, sorted at construction time.
+/// It stores elements in a `[F; N]` array, sorted at construction time.
 ///
 /// # Type Parameters
 ///
-/// * `N` — The number of elements in the sketch. Supported values: 3, 4, 6.
-///   (Aliases [`Sketch3`], [`Sketch4`], [`Sketch6`] are provided.)
+/// * `F` — The feature element type.
+/// * `N` — The number of elements in the sketch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FixedSketch<const N: usize> {
-    items: [u32; N],
+pub struct FixedSketch<F, const N: usize> {
+    items: [F; N],
 }
 
-impl<const N: usize> FixedSketch<N> {
+impl<F, const N: usize> FixedSketch<F, N>
+where
+    F: Copy + Ord + Eq + Hash,
+{
     /// Creates a new `FixedSketch` from an array.
     ///
     /// The input is sorted automatically. Returns an error if the array
@@ -73,7 +79,7 @@ impl<const N: usize> FixedSketch<N> {
     ///
     /// - [`SketchError::EmptySketch`] if `N == 0`.
     /// - [`SketchError::DuplicateElement`] if any duplicates are found.
-    pub fn new(mut items: [u32; N]) -> Result<Self, SketchError> {
+    pub fn new(mut items: [F; N]) -> Result<Self, SketchError<F>> {
         if N == 0 {
             return Err(SketchError::EmptySketch);
         }
@@ -88,13 +94,20 @@ impl<const N: usize> FixedSketch<N> {
     }
 
     /// Returns the sketch elements as a fixed-size array reference.
-    pub fn as_array(&self) -> &[u32; N] {
+    pub fn as_array(&self) -> &[F; N] {
         &self.items
     }
 }
 
-impl<const N: usize> Sketch for FixedSketch<N> {
-    type Iter<'a> = std::iter::Copied<std::slice::Iter<'a, u32>>;
+impl<F, const N: usize> Sketch for FixedSketch<F, N>
+where
+    F: Copy + Ord + Eq + Hash + Send + Sync + 'static,
+{
+    type Feature = F;
+    type Iter<'a>
+        = std::iter::Copied<std::slice::Iter<'a, F>>
+    where
+        F: 'a;
 
     fn len(&self) -> usize {
         N
@@ -108,7 +121,7 @@ impl<const N: usize> Sketch for FixedSketch<N> {
         self.items.iter().copied()
     }
 
-    fn as_slice(&self) -> &[u32] {
+    fn as_slice(&self) -> &[F] {
         &self.items
     }
 
@@ -132,19 +145,28 @@ impl<const N: usize> Sketch for FixedSketch<N> {
         intersection
     }
 
-    fn contains(&self, value: u32) -> bool {
+    fn contains(&self, value: F) -> bool {
         self.items.binary_search(&value).is_ok()
     }
 }
 
-/// A 3-element sketch (Palantir Tier-1, coarse-grained).
-pub type Sketch3 = FixedSketch<3>;
+/// A fixed-size sketch of `u32` features.
+pub type U32Sketch<const N: usize> = FixedSketch<u32, N>;
 
-/// A 4-element sketch (Palantir Tier-2, medium-grained).
-pub type Sketch4 = FixedSketch<4>;
+/// A fixed-size sketch of `u64` features.
+pub type U64Sketch<const N: usize> = FixedSketch<u64, N>;
 
-/// A 6-element sketch (Palantir Tier-3, fine-grained).
-pub type Sketch6 = FixedSketch<6>;
+/// Deprecated compatibility alias for existing users.
+#[deprecated(note = "use U32Sketch<3> or FixedSketch<u32, 3>")]
+pub type Sketch3 = U32Sketch<3>;
+
+/// Deprecated compatibility alias for existing users.
+#[deprecated(note = "use U32Sketch<4> or FixedSketch<u32, 4>")]
+pub type Sketch4 = U32Sketch<4>;
+
+/// Deprecated compatibility alias for existing users.
+#[deprecated(note = "use U32Sketch<6> or FixedSketch<u32, 6>")]
+pub type Sketch6 = U32Sketch<6>;
 
 #[cfg(test)]
 mod tests {
@@ -152,109 +174,116 @@ mod tests {
 
     #[test]
     fn new_sorts_unsorted_input() {
-        let s = FixedSketch::<3>::new([30, 10, 20]).unwrap();
+        let s = U32Sketch::<3>::new([30, 10, 20]).unwrap();
         assert_eq!(s.as_array(), &[10, 20, 30]);
     }
 
     #[test]
     fn new_preserves_already_sorted() {
-        let s = FixedSketch::<3>::new([10, 20, 30]).unwrap();
+        let s = U32Sketch::<3>::new([10, 20, 30]).unwrap();
         assert_eq!(s.as_array(), &[10, 20, 30]);
     }
 
     #[test]
     fn new_rejects_duplicates() {
-        let err = FixedSketch::<3>::new([1, 2, 2]).unwrap_err();
+        let err = U32Sketch::<3>::new([1, 2, 2]).unwrap_err();
         assert_eq!(err, SketchError::DuplicateElement(2));
     }
 
     #[test]
     fn new_different_permutations_equal() {
-        let a = FixedSketch::<6>::new([60, 10, 30, 20, 50, 40]).unwrap();
-        let b = FixedSketch::<6>::new([40, 50, 60, 10, 20, 30]).unwrap();
+        let a = U32Sketch::<6>::new([60, 10, 30, 20, 50, 40]).unwrap();
+        let b = U32Sketch::<6>::new([40, 50, 60, 10, 20, 30]).unwrap();
         assert_eq!(a, b);
     }
 
     #[test]
     fn new_rejects_empty() {
-        let err = FixedSketch::<0>::new([]).unwrap_err();
+        let err = U32Sketch::<0>::new([]).unwrap_err();
         assert_eq!(err, SketchError::EmptySketch);
     }
 
     #[test]
     fn as_array_returns_sorted() {
-        let s = FixedSketch::<3>::new([30, 10, 20]).unwrap();
+        let s = U32Sketch::<3>::new([30, 10, 20]).unwrap();
         assert_eq!(s.as_array(), &[10, 20, 30]);
     }
 
     #[test]
     fn as_slice_matches_as_array() {
-        let s = FixedSketch::<3>::new([30, 10, 20]).unwrap();
+        let s = U32Sketch::<3>::new([30, 10, 20]).unwrap();
         assert_eq!(s.as_slice(), s.as_array() as &[u32]);
     }
 
     #[test]
     fn len_returns_n() {
-        assert_eq!(Sketch6::new([1, 2, 3, 4, 5, 6]).unwrap().len(), 6);
-        assert_eq!(Sketch4::new([1, 2, 3, 4]).unwrap().len(), 4);
-        assert_eq!(Sketch3::new([1, 2, 3]).unwrap().len(), 3);
+        assert_eq!(U32Sketch::<6>::new([1, 2, 3, 4, 5, 6]).unwrap().len(), 6);
+        assert_eq!(U32Sketch::<4>::new([1, 2, 3, 4]).unwrap().len(), 4);
+        assert_eq!(U32Sketch::<3>::new([1, 2, 3]).unwrap().len(), 3);
     }
 
     #[test]
     fn is_empty_for_non_empty() {
-        assert!(!Sketch6::new([1, 2, 3, 4, 5, 6]).unwrap().is_empty());
+        assert!(!U32Sketch::<6>::new([1, 2, 3, 4, 5, 6]).unwrap().is_empty());
     }
 
     #[test]
     fn iter_returns_all_elements() {
-        let s = FixedSketch::<3>::new([30, 10, 20]).unwrap();
+        let s = U32Sketch::<3>::new([30, 10, 20]).unwrap();
         let collected: Vec<u32> = s.iter().collect();
         assert_eq!(collected, vec![10, 20, 30]);
     }
 
     #[test]
     fn contains_present_value() {
-        let s = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let s = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
         assert!(s.contains(30));
     }
 
     #[test]
     fn contains_absent_value() {
-        let s = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let s = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
         assert!(!s.contains(99));
     }
 
     #[test]
     fn full_intersection() {
-        let a = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
-        let b = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let a = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let b = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
         assert_eq!(a.intersection_size(&b), 6);
     }
 
     #[test]
     fn partial_intersection() {
-        let a = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
-        let b = FixedSketch::<6>::new([10, 20, 30, 70, 80, 90]).unwrap();
+        let a = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let b = U32Sketch::<6>::new([10, 20, 30, 70, 80, 90]).unwrap();
         assert_eq!(a.intersection_size(&b), 3);
     }
 
     #[test]
     fn zero_intersection() {
-        let a = FixedSketch::<3>::new([10, 20, 30]).unwrap();
-        let b = FixedSketch::<3>::new([40, 50, 60]).unwrap();
+        let a = U32Sketch::<3>::new([10, 20, 30]).unwrap();
+        let b = U32Sketch::<3>::new([40, 50, 60]).unwrap();
         assert_eq!(a.intersection_size(&b), 0);
     }
 
     #[test]
     fn self_intersection() {
-        let a = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let a = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
         assert_eq!(a.intersection_size(&a), 6);
     }
 
     #[test]
     fn intersection_is_commutative() {
-        let a = FixedSketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
-        let b = FixedSketch::<6>::new([10, 20, 30, 70, 80, 90]).unwrap();
+        let a = U32Sketch::<6>::new([10, 20, 30, 40, 50, 60]).unwrap();
+        let b = U32Sketch::<6>::new([10, 20, 30, 70, 80, 90]).unwrap();
         assert_eq!(a.intersection_size(&b), b.intersection_size(&a));
+    }
+
+    #[test]
+    fn supports_u64_features() {
+        let s = U64Sketch::<3>::new([30_u64, 10, 20]).unwrap();
+        assert_eq!(s.as_array(), &[10, 20, 30]);
+        assert!(s.contains(20));
     }
 }

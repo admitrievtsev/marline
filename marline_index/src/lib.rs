@@ -7,25 +7,29 @@
 //!
 //! # Overview
 //!
-//! - [`sketch`]: Defines the [`Sketch`] trait and [`FixedSketch<N>`]
-//!   implementations for representing chunk fingerprints.
-//! - [`index`]: Contains the [`SketchKVindex`] trait for sketch-based
-//!   key-value indexes, the [`PalantirIndex`] concrete implementation, and
-//!   the [`Store`] trait with its [`IndexStorage`] in-memory backend.
+//! - [`sketch`]: Defines the [`Sketch`] trait and [`FixedSketch<F, N>`]
+//!   implementation for representing fixed-size feature sets.
+//! - [`index`]: Contains the [`SketchIndexApi`] trait, the
+//!   [`InvertedSketchIndex`] implementation, and storage traits/backends.
 //!
 //! # Quick Start
 //!
 //! ```rust,ignore
-//! use marline_index::index::store::index_storage::IndexStorage;
-//! use marline_index::index::PalantirIndex;
-//! use marline_index::sketch::FixedSketch;
+//! use marline_index::index::store::IndexStorage;
+//! use marline_index::index::{InvertedSketchIndex, SketchIndexApi};
+//! use marline_index::sketch::U32Sketch;
 //!
 //! let storage = IndexStorage::new();
-//! let mut idx = PalantirIndex::new(storage);
+//! let idx = InvertedSketchIndex::new(storage);
 //!
-//! let sk = FixedSketch::<6>::new([1, 2, 3, 4, 5, 6]).unwrap();
+//! let sk = U32Sketch::<6>::new([1, 2, 3, 4, 5, 6]).unwrap();
 //! idx.put(&42_u64, sk).unwrap();
 //! ```
+//!
+//! [`Sketch`]: sketch::Sketch
+//! [`FixedSketch<F, N>`]: sketch::FixedSketch
+//! [`SketchIndexApi`]: index::SketchIndexApi
+//! [`InvertedSketchIndex`]: index::InvertedSketchIndex
 
 pub mod index;
 pub mod sketch;

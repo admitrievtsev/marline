@@ -7,6 +7,10 @@ pub enum IndexError {
     #[error("invalid search options provided")]
     InvalidSearchOptions,
 
+    /// Stored sketch and inverted postings diverged.
+    #[error("index storage is inconsistent: {0}")]
+    InconsistentStorage(String),
+
     /// An internal invariant was violated (e.g., a poisoned lock).
     #[error("internal invariant violation: {0}")]
     InternalInvariantViolation(String),

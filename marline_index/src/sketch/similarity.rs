@@ -2,15 +2,12 @@
 ///
 /// Stores intersection and union sizes. The Jaccard similarity can be
 /// derived from these values.
-///
-/// # Fields
-///
-/// * `intersection` — The size of the sketch intersection.
-/// * `union` — The size of the sketch union.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SimilarityScore {
-    intersection: usize,
-    union: usize,
+    /// The size of the sketch intersection.
+    pub intersection: usize,
+    /// The size of the sketch union.
+    pub union: usize,
 }
 
 impl SimilarityScore {
@@ -18,12 +15,17 @@ impl SimilarityScore {
     ///
     /// Returns `intersection / union` as an `f64`. Returns `0.0` when `union`
     /// is zero.
-    pub fn jaccard_similarity(&self) -> f64 {
+    pub fn jaccard(self) -> f64 {
         if self.union == 0 {
             0.0
         } else {
             self.intersection as f64 / self.union as f64
         }
+    }
+
+    /// Computes the Jaccard similarity coefficient.
+    pub fn jaccard_similarity(&self) -> f64 {
+        (*self).jaccard()
     }
 
     /// Creates a score for two sketches of equal `size`.
@@ -69,6 +71,7 @@ mod tests {
     fn jaccard_similarity_half_overlap() {
         let score = SimilarityScore { intersection: 5, union: 10 };
         assert!((score.jaccard_similarity() - 0.5).abs() < f64::EPSILON);
+        assert!((score.jaccard() - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
