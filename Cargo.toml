@@ -1,5 +1,5 @@
 [workspace]
-members = ["marline", "marline_delta", "marline_scrub", "marline_sketcher"]
+members = ["marline", "marline_delta", "marline_scrub", "marline_palantir", "marline_index", "marline_sketcher"]
 resolver = "2"
 
 [workspace.package]
@@ -16,7 +16,3 @@ huffman-compress = "0.6.1"
 bit-vec = "0.6.3"
 log = "0.4.27"
 fasthash = "0.4.0"
-
-
-[profile.release]
-debug = true

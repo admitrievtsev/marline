@@ -12,6 +12,7 @@ use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::{Data, Database, IterableDatabase};
 pub use ddelta_encoder::DdeltaEncoder;
 pub use ddelta_encoder::EdeltaOptimizations;
+pub use gdelta_encoder::gdelta_diff;
 pub use gdelta_encoder::GdeltaEncoder;
 
 pub(crate) use levenshtein_encoder::Action;
