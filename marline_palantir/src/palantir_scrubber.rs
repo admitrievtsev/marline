@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::io;
 
 use chunkfs::{ChunkHash, Data, DataContainer, IterableDatabase, Scrub, ScrubMeasurements};
@@ -6,58 +7,83 @@ use chunkfs::{ChunkHash, Data, DataContainer, IterableDatabase, Scrub, ScrubMeas
 use crate::encoder::PalantirEncoder;
 use crate::types::{Chunk, SuperFeature, SuperFeatureGenerator};
 
-pub type BlockId = u32;
+use marline_index::index::store::IndexStorage;
+use marline_index::index::InvertedSketchIndex;
+use marline_index::index::SketchIndexApi;
+use marline_index::sketch::{FixedSketch, U32Sketch};
 
-pub trait SimilarityIndex {
-    fn search(&self, super_features: &[SuperFeature]) -> Option<BlockId>;
-    fn insert(&mut self, super_features: &[SuperFeature], block_id: BlockId);
+pub struct Index<H: Clone + Eq + Hash + Send + Sync> {
+    tier1: InvertedSketchIndex<H, U32Sketch<3>, IndexStorage<H, U32Sketch<3>>>,
+    tier2: InvertedSketchIndex<H, U32Sketch<4>, IndexStorage<H, U32Sketch<4>>>,
+    tier3: InvertedSketchIndex<H, U32Sketch<6>, IndexStorage<H, U32Sketch<6>>>,
 }
 
-#[allow(dead_code)]
-#[derive(Default)]
-pub struct StubIndex {
-    tier1: HashMap<[u32; 3], BlockId>,
-    tier2: HashMap<[u32; 4], BlockId>,
-    tier3: HashMap<[u32; 6], BlockId>,
-}
-
-impl StubIndex {
+impl<H: Clone + Eq + Hash + Send + Sync> Index<H> {
     pub fn new() -> Self {
-        Self { tier1: HashMap::new(), tier2: HashMap::new(), tier3: HashMap::new() }
-    }
-}
+        let tier1_storage = IndexStorage::new();
+        let tier1 = InvertedSketchIndex::new(tier1_storage);
+        let tier2_storage = IndexStorage::new();
+        let tier2 = InvertedSketchIndex::new(tier2_storage);
+        let tier3_storage = IndexStorage::new();
+        let tier3 = InvertedSketchIndex::new(tier3_storage);
 
-impl SimilarityIndex for StubIndex {
-    fn search(&self, _super_features: &[SuperFeature]) -> Option<BlockId> {
-        None
+        Self { tier1, tier2, tier3 }
     }
 
-    fn insert(&mut self, _super_features: &[SuperFeature], _block_id: BlockId) {}
+    fn split_into_sketches(
+        sfs: &[SuperFeature],
+    ) -> Option<(U32Sketch<3>, U32Sketch<4>, U32Sketch<6>)> {
+        let t1: Vec<u32> = sfs.iter().filter(|sf| sf.tier_id() == 0).map(|sf| sf.value()).collect();
+        let t2: Vec<u32> = sfs.iter().filter(|sf| sf.tier_id() == 1).map(|sf| sf.value()).collect();
+        let t3: Vec<u32> = sfs.iter().filter(|sf| sf.tier_id() == 2).map(|sf| sf.value()).collect();
+
+        Some((
+            FixedSketch::new(t1.try_into().ok()?).ok()?,
+            FixedSketch::new(t2.try_into().ok()?).ok()?,
+            FixedSketch::new(t3.try_into().ok()?).ok()?,
+        ))
+    }
+
+    pub fn search(&self, sfs: &[SuperFeature]) -> Option<H> {
+        let (s3, s4, s6) = Self::split_into_sketches(sfs)?;
+        self.tier1
+            .get(&s3)
+            .ok()?
+            .or_else(|| self.tier2.get(&s4).ok()?)
+            .or_else(|| self.tier3.get(&s6).ok()?)
+    }
+
+    pub fn insert(&self, sfs: &[SuperFeature], hash: H) {
+        if let Some((s3, s4, s6)) = Self::split_into_sketches(sfs) {
+            let _ = self.tier1.put(&hash, s3);
+            let _ = self.tier2.put(&hash, s4);
+            let _ = self.tier3.put(&hash, s6);
+        }
+    }
 }
 
 #[allow(dead_code)]
-pub struct PalantirScrubber<S, I, E> {
+pub struct PalantirScrubber<S, H: Clone + Eq + Hash + Send + Sync, E> {
     sf_gen: S,
-    index: I,
+    index: Index<H>,
     encoder: E,
     fp_threshold: f64,
     avg_comp_ratio: f64,
     chunks_processed: u64,
 }
 
-impl<S, I, E> PalantirScrubber<S, I, E> {
-    pub fn new(sf_gen: S, index: I, encoder: E) -> Self {
+impl<S, H: Clone + Eq + Hash + Send + Sync, E> PalantirScrubber<S, H, E> {
+    pub fn new(sf_gen: S, index: Index<H>, encoder: E) -> Self {
         Self { sf_gen, index, encoder, fp_threshold: 0.9, avg_comp_ratio: 1.0, chunks_processed: 0 }
     }
 }
 
-impl<CDCHash, B, S, I, E> Scrub<CDCHash, B, CDCHash, HashMap<CDCHash, Vec<u8>>>
-    for PalantirScrubber<S, I, E>
+impl<CDCHash, B, S, E> Scrub<CDCHash, B, CDCHash, HashMap<CDCHash, Vec<u8>>>
+    for PalantirScrubber<S, CDCHash, E>
 where
-    CDCHash: ChunkHash,
+    CDCHash: ChunkHash + Send + Sync,
     B: IterableDatabase<CDCHash, DataContainer<CDCHash>>,
     S: SuperFeatureGenerator,
-    I: SimilarityIndex,
     E: PalantirEncoder,
 {
     fn scrub<'a>(
@@ -70,7 +96,7 @@ where
     {
         let start = std::time::Instant::now();
         let mut processed_data = 0;
-        let mut data_left = 0;
+        let data_left = 0;
 
         for (hash, container) in database.iterator_mut() {
             match container.extract() {
@@ -79,19 +105,25 @@ where
                     let super_features = self.sf_gen.generate(&chunk);
 
                     match self.index.search(&super_features) {
-                        Some(_) => {
-                            // TODO: get base_data from index/storage, encode delta
-                            //   let delta = self.encoder.encode(chunk_data, base_data);
-                            //   let delta_zst = zstd::encode_all(&delta[..], 0).unwrap();
-                            //   let simple_zst = zstd::encode_all(chunk_data, 0).unwrap();
-                            //   let ratio = delta_zst.len() as f64 / simple_zst.len() as f64;
-                            //   if ratio < self.fp_threshold {  // true positive
-                            //       target_map.insert(hash.clone(), delta);
-                            //       self.avg_comp_ratio = self.avg_comp_ratio * 0.95 + ratio * 0.05;
-                            //   } else {  // false positive → store as simple
-                            //       target_map.insert(hash.clone(), chunk_data.clone());
-                            //   }
-                            data_left += chunk_data.len();
+                        Some(base_hash) => {
+                            if let Some(base_data) = target_map.get(&base_hash) {
+                                let delta = self.encoder.encode(chunk_data, base_data);
+                                let delta_compressed = zstd::encode_all(delta.as_slice(), 0)?;
+                                let simple_compressed =
+                                    zstd::encode_all(chunk_data.as_slice(), 0)?;
+                                let ratio =
+                                    delta_compressed.len() as f64 / simple_compressed.len() as f64;
+
+                                if ratio < self.fp_threshold * self.avg_comp_ratio {
+                                    target_map.insert(hash.clone(), delta);
+                                    self.avg_comp_ratio = self.avg_comp_ratio * 0.95 + ratio * 0.05;
+                                } else {
+                                    target_map.insert(hash.clone(), chunk_data.clone());
+                                }
+                            } else {
+                                target_map.insert(hash.clone(), chunk_data.clone());
+                            }
+                            processed_data += chunk_data.len();
                         }
                         None => {
                             target_map.insert(hash.clone(), chunk_data.clone());
@@ -99,11 +131,11 @@ where
                         }
                     }
 
-                    self.index.insert(&super_features, 0);
+                    self.index.insert(&super_features, hash.clone());
                     container.make_target(vec![hash.clone()]);
                     self.chunks_processed += 1;
                 }
-                Data::TargetChunk(_) => {}
+                Data::TargetChunk(_) => {} // todo: add decoder and get full cycle of chunk scrub
             }
         }
 
@@ -114,6 +146,5 @@ where
             clusterization_report: None,
         })
     }
-
-    // todo: добавить метод update() который свяжет скраббер с метадата менеджером
+    // todo: add update() method for metadata manager
 }

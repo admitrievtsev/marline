@@ -11,4 +11,7 @@ log.workspace = true
 chunkfs.workspace = true
 rand.workspace = true
 marline_sketcher = {path = "../marline_sketcher"}
+marline_scrub = {path = "../marline_scrub"}
+marline_index = {path = "../marline_index"}
+zstd.workspace = true
 num = "0.4"
