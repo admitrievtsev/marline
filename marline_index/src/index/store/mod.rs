@@ -1,7 +1,4 @@
 //! Storage traits and in-memory backend for sketch indexes.
-//!
-//! Storage is intentionally independent from any product-specific tiering or
-//! retention policy. It stores sketches by key and posting lists by feature.
 
 use crate::index::error::IndexError;
 use crate::sketch::Sketch;
@@ -9,28 +6,7 @@ use crate::sketch::Sketch;
 pub mod index_storage;
 pub use index_storage::IndexStorage;
 
-/// Storage for direct key -> sketch records.
-pub trait SketchStorage<K, S: Sketch>: Send + Sync
-where
-    K: Clone + Send + Sync,
-{
-    /// Returns the sketch stored for the given key, or `None`.
-    fn get_sketch(&self, key: &K) -> Result<Option<S>, IndexError>;
-
-    /// Stores the sketch and returns the previous sketch for the key, if any.
-    fn put_sketch(&self, key: K, sketch: S) -> Result<Option<S>, IndexError>;
-
-    /// Removes the sketch stored for the key, if any.
-    fn remove_sketch(&self, key: &K) -> Result<Option<S>, IndexError>;
-
-    /// Returns the number of sketches stored.
-    fn len_sketches(&self) -> Result<usize, IndexError>;
-
-    /// Removes all sketches.
-    fn clear_sketches(&self) -> Result<(), IndexError>;
-}
-
-/// Storage for feature -> posting-list records.
+/// Storage for feature → posting-list records.
 pub trait InvertedStorage<K, F>: Send + Sync
 where
     K: Clone + Send + Sync,
@@ -53,36 +29,26 @@ where
 }
 
 /// Complete storage backend required by [`crate::index::InvertedSketchIndex`].
-pub trait Store<K, S>: SketchStorage<K, S> + InvertedStorage<K, S::Feature>
+pub trait Store<K, S>: InvertedStorage<K, S::Feature>
 where
     K: Clone + Send + Sync,
     S: Sketch,
 {
-    fn insert_entry(&self, key: K, sketch: S) -> Result<Option<S>, IndexError> {
-        let previous = self.put_sketch(key.clone(), sketch.clone())?;
-        if let Some(ref prev) = previous {
-            for f in prev.iter() {
-                self.remove_posting(f, &key)?;
-            }
-        }
+    /// Inserts an entry: stores each feature→key in the posting lists.
+    fn insert_entry(&self, key: K, sketch: S) -> Result<(), IndexError> {
         for f in sketch.iter() {
             self.insert_posting(f, key.clone())?;
         }
-        Ok(previous)
+        Ok(())
     }
 
-    fn remove_entry(&self, key: &K) -> Result<Option<S>, IndexError> {
-        let removed = self.remove_sketch(key)?;
-        if let Some(ref sketch) = removed {
-            for f in sketch.iter() {
-                self.remove_posting(f, key)?;
-            }
-        }
-        Ok(removed)
+    /// No-op — sketches are not stored, so old postings cannot be cleaned.
+    fn remove_entry(&self, _key: &K) -> Result<(), IndexError> {
+        Ok(())
     }
 
+    /// Removes all entries from the storage.
     fn clear(&self) -> Result<(), IndexError> {
-        self.clear_sketches()?;
         self.clear_postings()
     }
 }
@@ -91,6 +57,6 @@ impl<K, S, T> Store<K, S> for T
 where
     K: Clone + Send + Sync,
     S: Sketch,
-    T: SketchStorage<K, S> + InvertedStorage<K, S::Feature>,
+    T: InvertedStorage<K, S::Feature>,
 {
 }

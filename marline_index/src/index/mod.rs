@@ -1,40 +1,31 @@
 //! Generic sketch-based similarity indexes.
 //!
-//! This module provides a storage-backed inverted index for nearest-neighbor
+//! This module provides a posting-list-backed inverted index for nearest-neighbor
 //! search over arbitrary sketch implementations.
 
-use std::error::Error;
 use std::hash::Hash;
 
 use crate::sketch::Sketch;
 
 pub use error::IndexError;
-#[allow(deprecated)]
-pub use inverted::{InvertedSketchIndex, PalantirIndex};
+pub use inverted::InvertedSketchIndex;
 
 mod error;
 mod inverted;
 pub mod store;
 
-/// A key-value index with similarity search via sketches.
+/// A sketch-based similarity search index.
 ///
-/// This trait preserves the behavior of the previous Palantir-specific index
-/// API while removing product-specific tiering from the abstraction.
+/// # Type Parameters
+///
+/// * `K` — The key type (hash). Must be [`Clone`] + [`Eq`] + [`Hash`].
+/// * `S` — The sketch type. Must implement [`Sketch`].
 pub trait SketchIndexApi<K, S: Sketch>: Send + Sync
 where
     K: Clone + Eq + Hash + Send + Sync,
 {
     /// The error type returned by index operations.
-    type Error: Error + Send + Sync + 'static;
-
-    /// Returns the number of entries in the index.
-    fn len(&self) -> Result<usize, Self::Error>;
-
-    /// Returns `true` when the index has no entries.
-    fn is_empty(&self) -> Result<bool, Self::Error>;
-
-    /// Direct lookup: returns the sketch stored for the given key.
-    fn lookup(&self, key: &K) -> Result<Option<S>, Self::Error>;
+    type Error;
 
     /// Search: finds the closest matching key for a query sketch.
     fn get(&self, query: &S) -> Result<Option<K>, Self::Error>;
@@ -50,21 +41,4 @@ where
 
     /// Removes all entries from the index.
     fn clear(&self) -> Result<(), Self::Error>;
-}
-
-/// Deprecated compatibility alias for the previous trait name.
-#[deprecated(note = "use SketchIndexApi instead")]
-pub trait SketchKVindex<K, S: Sketch>: SketchIndexApi<K, S>
-where
-    K: Clone + Eq + Hash + Send + Sync,
-{
-}
-
-#[allow(deprecated)]
-impl<K, S, T> SketchKVindex<K, S> for T
-where
-    K: Clone + Eq + Hash + Send + Sync,
-    S: Sketch,
-    T: SketchIndexApi<K, S>,
-{
 }

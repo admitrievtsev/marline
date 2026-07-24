@@ -2,15 +2,15 @@
 //!
 //! `marline_index` provides data structures and algorithms for building
 //! key-value indexes that support nearest-neighbor search via sketches.
-//! A sketch is a compact, fixed-size representation of a chunk's content
+//! A sketch is a compact, fixed-size representation of an item's content
 //! that preserves similarity information.
 //!
 //! # Overview
 //!
 //! - [`sketch`]: Defines the [`Sketch`] trait and [`FixedSketch<F, N>`]
 //!   implementation for representing fixed-size feature sets.
-//! - [`index`]: Contains the [`SketchIndexApi`] trait, the
-//!   [`InvertedSketchIndex`] implementation, and storage traits/backends.
+//! - [`index`]: Contains the [`SketchIndexApi`] trait and the
+//!   [`InvertedSketchIndex`] implementation.
 //!
 //! # Quick Start
 //!

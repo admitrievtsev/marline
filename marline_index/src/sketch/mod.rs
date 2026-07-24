@@ -148,18 +148,6 @@ pub type U32Sketch<const N: usize> = FixedSketch<u32, N>;
 /// A fixed-size sketch of `u64` features.
 pub type U64Sketch<const N: usize> = FixedSketch<u64, N>;
 
-/// Deprecated compatibility alias for existing users.
-#[deprecated(note = "use U32Sketch<3> or FixedSketch<u32, 3>")]
-pub type Sketch3 = U32Sketch<3>;
-
-/// Deprecated compatibility alias for existing users.
-#[deprecated(note = "use U32Sketch<4> or FixedSketch<u32, 4>")]
-pub type Sketch4 = U32Sketch<4>;
-
-/// Deprecated compatibility alias for existing users.
-#[deprecated(note = "use U32Sketch<6> or FixedSketch<u32, 6>")]
-pub type Sketch6 = U32Sketch<6>;
-
 #[cfg(test)]
 mod tests {
     use super::*;
