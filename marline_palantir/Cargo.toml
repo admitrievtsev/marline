@@ -1,0 +1,17 @@
+[package]
+name = "marline_palantir"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sha2 = "0.10"
+fasthash.workspace = true
+thiserror.workspace = true
+log.workspace = true
+chunkfs.workspace = true
+rand.workspace = true
+marline_sketcher = {path = "../marline_sketcher"}
+marline_scrub = {path = "../marline_scrub"}
+marline_index = {path = "../marline_index"}
+zstd.workspace = true
+num = "0.4"
