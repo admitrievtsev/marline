@@ -2,7 +2,7 @@
 //!
 //! This module defines the [`Sketch`] trait and its fixed-size
 //! implementation [`FixedSketch<F, N>`], which represent compact fingerprints
-//! of items. Sketches are sorted arrays of unique feature elements
+//! of items. Sketches are sorted arrays of feature elements
 //! that preserve similarity — similar chunks produce similar sketches.
 
 use std::hash::Hash;
@@ -12,16 +12,14 @@ pub use similarity::SimilarityScore;
 
 /// Errors that can occur when creating a [`FixedSketch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SketchError<F = ()> {
+pub enum SketchError {
     /// The sketch has zero elements (empty array provided).
     EmptySketch,
-    /// The input contains duplicate values.
-    DuplicateElement(F),
 }
 
 /// Trait for a fixed-size set of features used in similarity search.
 ///
-/// Implementations must store elements sorted and free of duplicates.
+/// Implementations must store elements sorted.
 /// The trait provides O(N) set operations such as [`intersection_size`](Sketch::intersection_size)
 /// and O(log N) membership checking via [`contains`](Sketch::contains).
 pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
@@ -52,7 +50,7 @@ pub trait Sketch: Eq + Hash + Clone + Send + Sync + 'static {
     fn contains(&self, value: Self::Feature) -> bool;
 }
 
-/// Fixed-size sketch backed by a sorted array of `N` unique feature values.
+/// Fixed-size sketch backed by a sorted array of `N` feature values.
 ///
 /// [`FixedSketch`] is the primary implementation of the [`Sketch`] trait.
 /// It stores elements in a `[F; N]` array, sorted at construction time.
@@ -73,22 +71,16 @@ where
     /// Creates a new `FixedSketch` from an array.
     ///
     /// The input is sorted automatically. Returns an error if the array
-    /// contains duplicates or if `N = 0`.
+    /// if `N = 0`.
     ///
     /// # Errors
     ///
     /// - [`SketchError::EmptySketch`] if `N == 0`.
-    /// - [`SketchError::DuplicateElement`] if any duplicates are found.
-    pub fn new(mut items: [F; N]) -> Result<Self, SketchError<F>> {
+    pub fn new(mut items: [F; N]) -> Result<Self, SketchError> {
         if N == 0 {
             return Err(SketchError::EmptySketch);
         }
         items.sort_unstable();
-        for pair in items.windows(2) {
-            if pair[0] == pair[1] {
-                return Err(SketchError::DuplicateElement(pair[0]));
-            }
-        }
 
         Ok(Self { items })
     }
@@ -182,12 +174,6 @@ mod tests {
     fn new_preserves_already_sorted() {
         let s = U32Sketch::<3>::new([10, 20, 30]).unwrap();
         assert_eq!(s.as_array(), &[10, 20, 30]);
-    }
-
-    #[test]
-    fn new_rejects_duplicates() {
-        let err = U32Sketch::<3>::new([1, 2, 2]).unwrap_err();
-        assert_eq!(err, SketchError::DuplicateElement(2));
     }
 
     #[test]
