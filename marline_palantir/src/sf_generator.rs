@@ -3,19 +3,41 @@ use crate::GEAR;
 use num::integer::gcd;
 use std::hash::{DefaultHasher, Hasher};
 
+/// Generates super-features using a gear-hash rolling hash with random linear projections.
+///
+/// `PalantirHasher` implements the core feature-extraction algorithm of the
+/// Palantir method.  It scans chunk bytes with a gear-hash rolling hash,
+/// records minimum feature values per position, groups them by tier, and
+/// produces a final set of [`SuperFeature`](crate::types::SuperFeature) values.
+///
+/// # How it works
+///
+/// 1. A rolling hash (`fp`) is updated for each byte using the `GEAR` table.
+/// 2. When `fp` hits a zero value at the lowest `sampling_rate` bits, a
+///    feature-minimisation step is triggered: each position's candidate value is
+///    updated to `min(current, transform)` where `transform` is a linear
+///    projection of the fingerprint.
+/// 3. After the scan, raw features are grouped by `tier_list` sizes, sorted,
+///    and hashed into the final [`SuperFeature`](crate::types::SuperFeature) values.
 pub struct PalantirHasher {
+    /// Number of trailing zero bits required to trigger a feature update.
     sampling_rate: u64,
+    /// Random linear coefficients for feature-position transformations.
     linear_coefficients: Vec<u64>,
+    /// Group sizes for each super-feature tier.
     tier_list: Vec<u32>,
+    /// Total number of raw features (LCM of tier_list).
     features_num: usize,
 }
 
+/// Computes the least common multiple of `a` and `b`, returning `None` on overflow.
 fn lcm_checked(a: u32, b: u32) -> Option<u32> {
     let gcd_val = gcd(a, b);
     (a / gcd_val).checked_mul(b)
 }
 
-fn lcm_vec(nums: &Vec<u32>) -> Option<u32> {
+/// Computes the least common multiple of all numbers in `nums`, returning `None` on overflow.
+fn lcm_vec(nums: &[u32]) -> Option<u32> {
     let mut res: u32 = 1;
     for &i in nums {
         res = lcm_checked(res, i)?;
@@ -24,6 +46,21 @@ fn lcm_vec(nums: &Vec<u32>) -> Option<u32> {
 }
 
 impl PalantirHasher {
+    /// Creates a new `PalantirHasher`.
+    ///
+    /// The number of raw features is the least common multiple of all tier
+    /// sizes.  Random linear coefficients are generated for each feature
+    /// position.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `lcm_vec(&tier_list)` overflows (i.e., the product of tier
+    /// sizes exceeds `u32::MAX`).
+    ///
+    /// # Arguments
+    /// * `sampling_rate` — Number of trailing-zero bits required on the
+    ///   gear-hash fingerprint to trigger feature extraction.
+    /// * `tier_list` — Group sizes for each tier (e.g., `vec![3, 4, 6]`).
     pub fn new(sampling_rate: u64, tier_list: Vec<u32>) -> Self {
         let features_num = lcm_vec(&tier_list).unwrap() as usize;
         let mut linear_coefficients = Vec::with_capacity(features_num);
@@ -35,6 +72,15 @@ impl PalantirHasher {
 }
 
 impl SuperFeatureGenerator for PalantirHasher {
+    /// Generates super-features from a chunk's content.
+    ///
+    /// The algorithm:
+    /// 1. Initialises `features_num` raw feature slots to `u64::MAX`.
+    /// 2. Iterates each byte, updating the gear-hash fingerprint.
+    /// 3. On a sampling hit, conditionally updates each feature slot with a
+    ///    linear transformation of the fingerprint.
+    /// 4. Groups the final features by tier, sorts each group, and hashes them
+    ///    into a [`SuperFeature`](crate::types::SuperFeature).
     fn generate(&self, chunk: &Chunk) -> Vec<crate::types::SuperFeature> {
         let data = chunk.as_bytes();
         let mut features = vec![u64::MAX; self.features_num];

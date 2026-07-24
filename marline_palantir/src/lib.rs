@@ -1,3 +1,61 @@
+//! Implementation of the **Palantir** method for similarity-based delta encoding
+//! in chunk-level deduplication systems.
+//!
+//! The Palantir method identifies similar chunks via multi-tier
+//! **super-features** — compact, similarity-preserving digests computed from
+//! chunk content.  When a newly arrived chunk matches a previously stored
+//! chunk at any tier of the index, the chunk is stored as a delta relative to
+//! its nearest neighbour, significantly reducing storage overhead.
+//!
+//! # Algorithm overview
+//!
+//! 1. **Super-feature generation** — [`sf_generator::PalantirHasher`] scans a
+//!    chunk with a gear-hash rolling hash and computes a set of minimum-value
+//!    features.  Features are grouped by tier and hashed into super-features.
+//! 2. **Index lookup** — Super-features are split into fixed-size sketches
+//!    and queried against a multi-tier [`palantir_scrubber::Index`].
+//! 3. **Delta encoding** — If a similar base chunk is found, the encoder
+//!    ([`encoder::PalantirEncoder`]) produces a delta; otherwise the raw chunk
+//!    is stored.
+//! 4. **Scrubbing** — [`palantir_scrubber::PalantirScrubber`] orchestrates
+//!    the full pipeline (feature generation → lookup → delta-or-store) for
+//!    every chunk in a storage backend.
+//!
+//! # Modules
+//!
+//! | Module | Description |
+//! |--------|-------------|
+//! | [`types`] | Core data types: [`Chunk`], [`SuperFeature`], [`ChunkDigest`], [`TierConfig`] |
+//! | [`sf_generator`] | Feature generation: [`PalantirHasher`] and the [`SuperFeatureGenerator`] trait |
+//! | [`encoder`] | Delta encoding: [`PalantirEncoder`] trait and [`GdeltaEncoder`] |
+//! | [`palantir_scrubber`] | Scrubbing pipeline: [`PalantirScrubber`] and multi-tier [`Index`] |
+//! | [`error`] | Error types for the crate |
+//! | [`metadata_manager`] | Placeholder for metadata management |
+//!
+//! # Quick start
+//!
+//! ```rust,ignore
+//! use marline_palantir::sf_generator::PalantirHasher;
+//! use marline_palantir::palantir_scrubber::{Index, PalantirScrubber};
+//! use marline_palantir::encoder::GdeltaEncoder;
+//!
+//! let sf_gen = PalantirHasher::new(7, vec![3, 4, 6]);
+//! let index: Index<u64> = Index::new();
+//! let encoder = GdeltaEncoder;
+//! let mut scrubber = PalantirScrubber::new(sf_gen, index, encoder);
+//! ```
+//!
+//! [`Chunk`]: types::Chunk
+//! [`SuperFeature`]: types::SuperFeature
+//! [`SuperFeatureGenerator`]: types::SuperFeatureGenerator
+//! [`ChunkDigest`]: types::ChunkDigest
+//! [`TierConfig`]: types::TierConfig
+//! [`PalantirHasher`]: sf_generator::PalantirHasher
+//! [`PalantirEncoder`]: encoder::PalantirEncoder
+//! [`GdeltaEncoder`]: encoder::GdeltaEncoder
+//! [`Index`]: palantir_scrubber::Index
+//! [`PalantirScrubber`]: palantir_scrubber::PalantirScrubber
+//!
 pub mod encoder;
 pub mod error;
 pub mod metadata_manager;
