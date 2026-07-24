@@ -109,8 +109,7 @@ where
                             if let Some(base_data) = target_map.get(&base_hash) {
                                 let delta = self.encoder.encode(chunk_data, base_data);
                                 let delta_compressed = zstd::encode_all(delta.as_slice(), 0)?;
-                                let simple_compressed =
-                                    zstd::encode_all(chunk_data.as_slice(), 0)?;
+                                let simple_compressed = zstd::encode_all(chunk_data.as_slice(), 0)?;
                                 let ratio =
                                     delta_compressed.len() as f64 / simple_compressed.len() as f64;
 
