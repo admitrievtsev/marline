@@ -3,7 +3,7 @@ use crate::index::store::{InvertedStorage, SketchStorage};
 use crate::sketch::Sketch;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// In-memory storage backend backed by `RwLock`-protected maps.
 pub struct IndexStorage<K, S: Sketch> {
@@ -15,6 +15,35 @@ impl<K, S: Sketch> IndexStorage<K, S> {
     /// Creates an empty in-memory storage backend.
     pub fn new() -> Self {
         Self { sketches: RwLock::new(HashMap::new()), postings: RwLock::new(HashMap::new()) }
+    }
+
+    /// Private helpers
+    fn sketches_read(&self) -> Result<RwLockReadGuard<'_, HashMap<K, S>>, IndexError> {
+        self.sketches
+            .read()
+            .map_err(|_| IndexError::InternalInvariantViolation("sketches lock poisoned".into()))
+    }
+
+    fn sketches_write(&self) -> Result<RwLockWriteGuard<'_, HashMap<K, S>>, IndexError> {
+        self.sketches
+            .write()
+            .map_err(|_| IndexError::InternalInvariantViolation("sketches lock poisoned".into()))
+    }
+
+    fn postings_read(
+        &self,
+    ) -> Result<RwLockReadGuard<'_, HashMap<S::Feature, HashSet<K>>>, IndexError> {
+        self.postings
+            .read()
+            .map_err(|_| IndexError::InternalInvariantViolation("postings lock poisoned".into()))
+    }
+
+    fn postings_write(
+        &self,
+    ) -> Result<RwLockWriteGuard<'_, HashMap<S::Feature, HashSet<K>>>, IndexError> {
+        self.postings
+            .write()
+            .map_err(|_| IndexError::InternalInvariantViolation("postings lock poisoned".into()))
     }
 }
 
@@ -33,42 +62,27 @@ where
     S: Sketch,
 {
     fn get_sketch(&self, key: &K) -> Result<Option<S>, IndexError> {
-        let sketches = self
-            .sketches
-            .read()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let sketches = self.sketches_read()?;
         Ok(sketches.get(key).cloned())
     }
 
     fn put_sketch(&self, key: K, sketch: S) -> Result<Option<S>, IndexError> {
-        let mut sketches = self
-            .sketches
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let mut sketches = self.sketches_write()?;
         Ok(sketches.insert(key, sketch))
     }
 
     fn remove_sketch(&self, key: &K) -> Result<Option<S>, IndexError> {
-        let mut sketches = self
-            .sketches
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let mut sketches = self.sketches_write()?;
         Ok(sketches.remove(key))
     }
 
     fn len_sketches(&self) -> Result<usize, IndexError> {
-        let sketches = self
-            .sketches
-            .read()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let sketches = self.sketches_read()?;
         Ok(sketches.len())
     }
 
     fn clear_sketches(&self) -> Result<(), IndexError> {
-        let mut sketches = self
-            .sketches
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let mut sketches = self.sketches_write()?;
         sketches.clear();
         Ok(())
     }
@@ -80,28 +94,17 @@ where
     S: Sketch,
 {
     fn posting_list(&self, feature: S::Feature) -> Result<Vec<K>, IndexError> {
-        let postings = self
-            .postings
-            .read()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
+        let postings = self.postings_read()?;
         Ok(postings.get(&feature).map(|keys| keys.iter().cloned().collect()).unwrap_or_default())
     }
 
     fn insert_posting(&self, feature: S::Feature, key: K) -> Result<(), IndexError> {
-        let mut postings = self
-            .postings
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
-        postings.entry(feature).or_default().insert(key);
+        self.postings_write()?.entry(feature).or_default().insert(key);
         Ok(())
     }
 
     fn remove_posting(&self, feature: S::Feature, key: &K) -> Result<(), IndexError> {
-        let mut postings = self
-            .postings
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
-
+        let mut postings = self.postings_write()?;
         if let Some(keys) = postings.get_mut(&feature) {
             keys.remove(key);
             if keys.is_empty() {
@@ -112,19 +115,11 @@ where
     }
 
     fn len_postings(&self) -> Result<usize, IndexError> {
-        let postings = self
-            .postings
-            .read()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
-        Ok(postings.len())
+        Ok(self.postings_read()?.len())
     }
 
     fn clear_postings(&self) -> Result<(), IndexError> {
-        let mut postings = self
-            .postings
-            .write()
-            .map_err(|_| IndexError::InternalInvariantViolation(String::from("rwlock poisoned")))?;
-        postings.clear();
+        self.postings_write()?.clear();
         Ok(())
     }
 }

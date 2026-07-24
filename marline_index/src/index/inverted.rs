@@ -31,20 +31,6 @@ where
     pub fn into_store(self) -> ST {
         self.store
     }
-
-    fn remove_postings_for(&self, key: &K, sketch: &S) -> Result<(), IndexError> {
-        for feature in sketch.iter() {
-            self.store.remove_posting(feature, key)?;
-        }
-        Ok(())
-    }
-
-    fn insert_postings_for(&self, key: &K, sketch: &S) -> Result<(), IndexError> {
-        for feature in sketch.iter() {
-            self.store.insert_posting(feature, key.clone())?;
-        }
-        Ok(())
-    }
 }
 
 impl<K, S, ST> SketchIndexApi<K, S> for InvertedSketchIndex<K, S, ST>
@@ -72,18 +58,12 @@ where
     }
 
     fn put(&self, key: &K, sketch: S) -> Result<(), Self::Error> {
-        let previous = self.store.put_sketch(key.clone(), sketch.clone())?;
-        if let Some(previous) = previous {
-            self.remove_postings_for(key, &previous)?;
-        }
-        self.insert_postings_for(key, &sketch)
+        self.store.insert_entry(key.clone(), sketch)?;
+        Ok(())
     }
 
     fn remove(&self, key: &K) -> Result<(), Self::Error> {
-        let removed = self.store.remove_sketch(key)?;
-        if let Some(sketch) = &removed {
-            self.remove_postings_for(key, sketch)?;
-        }
+        self.store.remove_entry(key)?;
         Ok(())
     }
 
@@ -120,8 +100,7 @@ where
     }
 
     fn clear(&self) -> Result<(), Self::Error> {
-        self.store.clear_sketches()?;
-        self.store.clear_postings()
+        self.store.clear()
     }
 }
 

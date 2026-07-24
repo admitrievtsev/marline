@@ -58,6 +58,33 @@ where
     K: Clone + Send + Sync,
     S: Sketch,
 {
+    fn insert_entry(&self, key: K, sketch: S) -> Result<Option<S>, IndexError> {
+        let previous = self.put_sketch(key.clone(), sketch.clone())?;
+        if let Some(ref prev) = previous {
+            for f in prev.iter() {
+                self.remove_posting(f, &key)?;
+            }
+        }
+        for f in sketch.iter() {
+            self.insert_posting(f, key.clone())?;
+        }
+        Ok(previous)
+    }
+
+    fn remove_entry(&self, key: &K) -> Result<Option<S>, IndexError> {
+        let removed = self.remove_sketch(key)?;
+        if let Some(ref sketch) = removed {
+            for f in sketch.iter() {
+                self.remove_posting(f, key)?;
+            }
+        }
+        Ok(removed)
+    }
+
+    fn clear(&self) -> Result<(), IndexError> {
+        self.clear_sketches()?;
+        self.clear_postings()
+    }
 }
 
 impl<K, S, T> Store<K, S> for T
