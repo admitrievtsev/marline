@@ -3,21 +3,51 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::io;
 
+#[derive(Clone)]
+pub struct Entry {
+    manifest: Option<HashMap<u32, u32>>,
+    data: Vec<u8>,
+}
+
+impl Entry {
+    pub fn new(manifest: Option<HashMap<u32, u32>>, data: Vec<u8>) -> Self {
+        Entry { manifest, data }
+    }
+    pub fn get_manifest(&self) -> &Option<HashMap<u32, u32>> {
+        &self.manifest
+    }
+    pub fn get_data(&self) -> &Vec<u8> {
+        &self.data
+    }
+}
+
+impl From<Vec<u8>> for Entry {
+    fn from(data: Vec<u8>) -> Self {
+        Entry::new(None, data)
+    }
+}
+
 pub struct MockRocksDBMap {
-    inner: HashMap<[u8; 32], Vec<u8>>,
+    inner: HashMap<[u8; 32], Entry>,
     pub get_count: Cell<usize>,
     pub insert_count: Cell<usize>,
     pub clear_count: Cell<usize>,
 }
 
-impl Database<[u8; 32], Vec<u8>> for MockRocksDBMap {
-    fn insert(&mut self, key: [u8; 32], value: Vec<u8>) -> io::Result<()> {
+impl MockRocksDBMap {
+    pub fn get_2(&self, key: &[u8; 32]) -> Option<&Entry> {
+        self.inner.get(key)
+    }
+}
+
+impl Database<[u8; 32], Entry> for MockRocksDBMap {
+    fn insert(&mut self, key: [u8; 32], value: Entry) -> io::Result<()> {
         self.insert_count.set(self.insert_count.get() + 1);
         self.inner.insert(key, value);
         Ok(())
     }
 
-    fn get(&self, key: &[u8; 32]) -> io::Result<Vec<u8>> {
+    fn get(&self, key: &[u8; 32]) -> io::Result<Entry> {
         self.get_count.set(self.get_count.get() + 1);
         self.inner
             .get(key)
@@ -30,12 +60,12 @@ impl Database<[u8; 32], Vec<u8>> for MockRocksDBMap {
     }
 }
 
-impl IterableDatabase<[u8; 32], Vec<u8>> for MockRocksDBMap {
-    fn iterator(&self) -> Box<dyn Iterator<Item = (&[u8; 32], &Vec<u8>)> + '_> {
+impl IterableDatabase<[u8; 32], Entry> for MockRocksDBMap {
+    fn iterator(&self) -> Box<dyn Iterator<Item = (&[u8; 32], &Entry)> + '_> {
         Box::new(self.inner.iter())
     }
 
-    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&[u8; 32], &mut Vec<u8>)> + '_> {
+    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&[u8; 32], &mut Entry)> + '_> {
         Box::new(self.inner.iter_mut())
     }
 
@@ -69,6 +99,6 @@ impl MockRocksDBMap {
         self.inner.is_empty()
     }
     pub fn total_bytes(&self) -> usize {
-        self.inner.values().map(|v| v.len()).sum()
+        self.inner.values().map(|v| v.data.len()).sum()
     }
 }

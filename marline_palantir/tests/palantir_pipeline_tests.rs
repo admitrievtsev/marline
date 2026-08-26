@@ -67,7 +67,7 @@ fn similar_chunks() {
     database.insert(hash_base, DataContainer::from(base.clone()));
     database.insert(hash_similar, DataContainer::from(similar.clone()));
 
-    let mut target_map = MockRocksDBMap::new();
+    let mut target_map = HashMap::new();
     let result = scrubber.scrub(&mut database, &mut target_map).unwrap();
 
     assert_eq!(result.processed_data, base.len() + similar.len());

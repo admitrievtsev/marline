@@ -1,7 +1,21 @@
-use crate::types::{Chunk, SuperFeature, SuperFeatureGenerator};
+use crate::types::{Chunk, SuperFeature};
 use crate::utils::lcm_vec;
 use crate::GEAR;
+use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hasher};
+
+/// Generates a set of [`SuperFeature`] values from a [`Chunk`].
+///
+/// Implementations define how raw chunk bytes are converted into
+/// similarity-preserving fingerprints that can be indexed and searched.
+pub trait SuperFeatureGenerator {
+    /// Computes super-features for the given chunk.
+    fn generate(&self, chunk: &Chunk) -> Vec<SuperFeature>;
+
+    fn generate_with_table(&self, chunk: &Chunk) -> (Vec<SuperFeature>, HashMap<u32, u32>);
+
+    fn generate_from_raw(&self, features: &[u32]) -> Vec<crate::types::SuperFeature>;
+}
 
 /// Generates super-features using a gear-hash rolling hash with random linear projections.
 ///
@@ -118,5 +132,71 @@ impl SuperFeatureGenerator for PalantirHasher {
         }
 
         super_features
+    }
+
+    fn generate_from_raw(&self, features: &[u32]) -> Vec<crate::types::SuperFeature> {
+        let capacity =
+            self.tier_list.iter().map(|tier| self.features_num as u32 / tier).sum::<u32>() as usize;
+        let mut super_features: Vec<SuperFeature> = Vec::with_capacity(capacity);
+        for (tier_id, &group_size) in self.tier_list.iter().enumerate() {
+            let gs = group_size as usize;
+            let num_sf = self.features_num / gs;
+            for sf_idx in 0..num_sf {
+                let start = sf_idx * gs;
+                let mut group: Vec<u32> = features[start..start + gs].to_vec();
+                group.sort();
+                let mut hasher = DefaultHasher::new();
+                for &val in &group {
+                    hasher.write_u32(val);
+                }
+                let hash = hasher.finish();
+                super_features.push(crate::types::SuperFeature::new(tier_id as u8, hash as u32));
+            }
+        }
+
+        super_features
+    }
+
+    fn generate_with_table(&self, chunk: &Chunk) -> (Vec<SuperFeature>, HashMap<u32, u32>) {
+        let data = chunk.as_bytes();
+        let mut features = vec![u64::MAX; self.features_num];
+
+        let mask = (1u64 << self.sampling_rate) - 1;
+        let mut fp = 0u64;
+
+        for &byte in data {
+            fp = (fp << 1).wrapping_add(GEAR[byte as usize]);
+
+            if fp & mask == 0 {
+                for (i, feature) in features.iter_mut().enumerate().take(self.features_num) {
+                    let transform =
+                        self.linear_coefficients[i].wrapping_mul(fp).wrapping_add(byte as u64)
+                            % (1u64 << 32);
+                    if *feature > transform {
+                        *feature = transform;
+                    }
+                }
+            }
+        }
+        let capacity =
+            self.tier_list.iter().map(|tier| self.features_num as u32 / tier).sum::<u32>() as usize;
+        let mut super_features: Vec<SuperFeature> = Vec::with_capacity(capacity);
+        for (tier_id, &group_size) in self.tier_list.iter().enumerate() {
+            let gs = group_size as usize;
+            let num_sf = self.features_num / gs;
+            for sf_idx in 0..num_sf {
+                let start = sf_idx * gs;
+                let mut group: Vec<u64> = features[start..start + gs].to_vec();
+                group.sort();
+                let mut hasher = DefaultHasher::new();
+                for &val in &group {
+                    hasher.write_u64(val);
+                }
+                let hash = hasher.finish();
+                super_features.push(crate::types::SuperFeature::new(tier_id as u8, hash as u32));
+            }
+        }
+
+        (super_features, HashMap::new())
     }
 }

@@ -15,6 +15,7 @@ marline_scrub = {path = "../marline_scrub"}
 marline_index = {path = "../marline_index"}
 zstd.workspace = true
 num = "0.4"
+blake3 = "1.8.5"
 
 [[bin]]
 name = "palantir_metrics"

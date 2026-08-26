@@ -1,5 +1,3 @@
-use super::chunk::Chunk;
-
 /// A single tiered similarity fingerprint.
 ///
 /// Each `SuperFeature` belongs to a specific tier and carries a hash value
@@ -56,13 +54,4 @@ impl<const N: usize> TierConfig<N> {
     pub fn with_features_num(tier_list: [u32; N], features_num: usize) -> Self {
         Self { tier_list, features_num: Some(features_num) }
     }
-}
-
-/// Generates a set of [`SuperFeature`] values from a [`Chunk`].
-///
-/// Implementations define how raw chunk bytes are converted into
-/// similarity-preserving fingerprints that can be indexed and searched.
-pub trait SuperFeatureGenerator {
-    /// Computes super-features for the given chunk.
-    fn generate(&self, chunk: &Chunk) -> Vec<SuperFeature>;
 }
