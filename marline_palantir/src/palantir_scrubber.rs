@@ -237,7 +237,7 @@ pub(crate) fn get_manifest<'a>(
     target_map: &'a MockRocksDBMap,
     delta_bases: &HashMap<[u8; 32], [u8; 32]>,
     hash: &[u8; 32],
-) -> (&'a Vec<u8>, &'a Option<HashMap<u32, u32>>) {
+) -> (&'a Vec<u8>, &'a Option<HashMap<u64, u32>>) {
     let mut chain = Vec::new();
     let mut cur = *hash;
     while let Some(&base) = delta_bases.get(&cur) {
@@ -248,4 +248,19 @@ pub(crate) fn get_manifest<'a>(
     let base_chunk = target_map.get_2(&cur).unwrap().get_data();
     let manifest = target_map.get_2(&cur).unwrap().get_manifest();
     (base_chunk, manifest)
+}
+
+pub(crate) fn get_entry<'a>(
+    target_map: &'a mut MockRocksDBMap,
+    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
+    hash: &[u8; 32],
+) -> &'a mut Entry {
+    let mut chain = Vec::new();
+    let mut cur = *hash;
+    while let Some(&base) = delta_bases.get(&cur) {
+        chain.push(cur);
+        cur = base;
+    }
+
+    target_map.get_2_mut(&cur).unwrap()
 }

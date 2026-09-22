@@ -149,7 +149,6 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
     let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
     let mut aged_files = vec![];
     for files in kernel_files {
-
         // println!("{}", files.len());
         let mut a = vec![];
         for data in files {
@@ -160,9 +159,7 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
     let start = Instant::now();
     println!("Files to write: {}", aged_files.len());
     for file in aged_files {
-
         online_sbc.write(&file).unwrap();
-
     }
 
     let elapsed = start.elapsed();
@@ -184,7 +181,10 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
 }
 
 fn ensure_datasets() -> Vec<std::path::PathBuf> {
-    const KERNEL_VERSIONS: [&str; 3] = ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7"];
+    const KERNEL_VERSIONS: [&str; 5] =
+//   ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7", "linux-3.4.8", "linux-3.4.9"];
+//       ["linux-3.4.5", "linux-3.5.6", "linux-3.6.7", "linux-3.7.8", "linux-3.8.9"];
+    ["linux-3.4.5", "linux-3.6.6", "linux-3.8.7", "linux-3.10.8", "linux-3.12.9"];
 
     let base = match std::env::var_os("MARLINE_DATA_DIR") {
         Some(v) => std::path::PathBuf::from(v),

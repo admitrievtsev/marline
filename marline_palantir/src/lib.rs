@@ -61,7 +61,11 @@
 //!
 pub mod encoder;
 pub mod error;
-mod fastcdc;
+/// FastCDC v2020 chunker with unified sketch evaluation.
+///
+/// [`cut_gear`]: fastcdc::cut_gear
+/// [`FastCDC`]: fastcdc::FastCDC
+pub mod fastcdc;
 pub mod lifecycle_manager;
 pub mod metadata_manager;
 pub mod mock_rocksdb;

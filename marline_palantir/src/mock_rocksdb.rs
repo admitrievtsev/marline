@@ -2,19 +2,21 @@ use chunkfs::{Database, IterableDatabase};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::io;
-
 #[derive(Clone)]
 pub struct Entry {
-    manifest: Option<HashMap<u32, u32>>,
+    manifest: Option<HashMap<u64, u32>>,
     data: Vec<u8>,
 }
 
 impl Entry {
-    pub fn new(manifest: Option<HashMap<u32, u32>>, data: Vec<u8>) -> Self {
+    pub fn new(manifest: Option<HashMap<u64, u32>>, data: Vec<u8>) -> Self {
         Entry { manifest, data }
     }
-    pub fn get_manifest(&self) -> &Option<HashMap<u32, u32>> {
+    pub fn get_manifest(&self) -> &Option<HashMap<u64, u32>> {
         &self.manifest
+    }
+    pub fn get_manifest_mut(&mut self) -> &mut Option<HashMap<u64, u32>> {
+        &mut self.manifest
     }
     pub fn get_data(&self) -> &Vec<u8> {
         &self.data
@@ -37,6 +39,10 @@ pub struct MockRocksDBMap {
 impl MockRocksDBMap {
     pub fn get_2(&self, key: &[u8; 32]) -> Option<&Entry> {
         self.inner.get(key)
+    }
+
+    pub fn get_2_mut(&mut self, key: &[u8; 32]) -> Option<&mut Entry> {
+        self.inner.get_mut(key)
     }
 }
 

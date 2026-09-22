@@ -254,35 +254,35 @@ pub fn gdelta_diff(new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
 pub fn gdelta_diff_new(
     new_chunk: &[u8],
     base_chunk: &[u8],
-    manifest: &HashMap<u32, u32>,
+    manifest: &HashMap<u64, u32>,
 ) -> Vec<u8> {
-    let base_len = base_chunk.len() as u32;
+    let base_len = base_chunk.len();
 
-    let new_len = new_chunk.len() as u32;
-    let word_size: u32 = 16;
+    let new_len = new_chunk.len();
+    let word_size: usize = 16;
     if new_len < word_size || base_len < word_size {
         return new_chunk.to_vec();
     }
-    let move_bts: usize = 64 / word_size as usize;
+    let move_bts: usize = 64 / word_size;
     let mask_bts: usize = (base_chunk.len() as f64).log2() as usize;
 
     let mut delta_code = Vec::new();
-    let mut anchor: u32 = 0;
+    let mut anchor: usize = 0;
     let mut fp = 0u64;
 
     for j in 0..(word_size - 1) {
-        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[j as usize] as usize]);
+        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[j] as usize]);
     }
 
     let mut j = 0;
     while j + word_size <= new_len {
-        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[(j + word_size - 1) as usize] as usize]);
+        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[j + word_size - 1] as usize]);
         let word_hash: u64 = fp >> (64 - mask_bts);
 
-        if let Some(&offset) = manifest.get(&(word_hash as u32)) {
-            let mut equal_part_len: u32 = 0;
-            for k in 0..min(base_len - offset, new_len - j) {
-                if base_chunk[(offset + k) as usize] != new_chunk[(j + k) as usize] {
+        if let Some(&offset) = manifest.get(&(word_hash)) {
+            let mut equal_part_len: usize = 0;
+            for k in 0..min(base_len - offset as usize, new_len - j) {
+                if base_chunk[offset as usize + k] != new_chunk[j + k] {
                     break;
                 }
                 equal_part_len += 1;

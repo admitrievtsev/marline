@@ -1,16 +1,20 @@
 use crate::encoder::PalantirEncoder;
 use crate::error::PalantirError;
-use crate::fastcdc::FastCDC;
+use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
 use crate::mock_rocksdb::{Entry, MockRocksDBMap};
-use crate::palantir_scrubber::get_manifest;
+use crate::palantir_scrubber::get_entry;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
 use chunkfs::{ChunkHash, Database};
 use marline_index::heuristic_index::SearchConfig;
 use std::collections::HashMap;
 use std::hash::Hash;
+
+/// Minimum chunk size used by the online chunker; also the start of the
+/// feature-collection window inside each chunk.
+pub const CHUNK_MIN_SIZE: usize = 1024 * 512;
 
 pub trait OnlineSBC<
     S,
@@ -37,6 +41,9 @@ pub struct PalantirOnline<
     encoder: E,
     /// False-positive threshold for delta encoding ratio.
     fp_threshold: f64,
+    /// Compute super-features with a second scan over each chunk (baseline
+    /// two-pass mode) instead of reusing raw features collected during chunking.
+    naive: bool,
     /// Total chunks processed.
     chunks_processed: u64,
     /// Count of chunks stored as deltas.
@@ -47,11 +54,14 @@ pub struct PalantirOnline<
     target_map: HashMap<H, Vec<u8>>,
 }
 
+#[allow(unused_variables)]
 impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
-        let chunker = FastCDC::new(&data, 8096, 32768, 131072);
+        let chunker = FastCDC::new(&data, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
+        // let chunker = FastCDC::new(&data, 1024 * 8, 16 * 1024, 32 * 1024);
+
         for (chunk, sf_raw) in chunker {
             let chunk_data = &data[chunk.offset..chunk.offset + chunk.length].to_vec();
             let mut hasher = blake3::Hasher::new();
@@ -64,30 +74,34 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
             match self.metadata_manager.lookup_fingerprint(hash) {
                 Some(_) => {}
                 None => {
-                    let super_features = self.sf_gen.generate_from_raw(&sf_raw);
+                    let super_features = if self.naive {
+                        // Baseline: recompute features with a second scan
+                        // over the chunk data instead of reusing the
+                        // in-pass features.
+                        let sf = collect_raw_features(chunk_data, CHUNK_MIN_SIZE);
+                        debug_assert_eq!(sf, sf_raw, "two-pass features must equal in-pass");
+                        self.sf_gen.generate_from_raw(&sf)
+                    } else {
+                        self.sf_gen.generate_from_raw(&sf_raw)
+                    };
+
                     match self.metadata_manager.lookup_super_features(&super_features) {
                         Some((base_hash, _)) => {
-                            match get_manifest(
-                                &self.manifest_base,
+                            let entry = get_entry(
+                                &mut self.manifest_base,
                                 &self.delta_bases,
                                 &base_hash.hash,
-                            ) {
-                                (base_chunk, None) => {
-                                    let delta = self
-                                        .encoder
-                                        .encode(chunk_data, base_chunk);
-                                    // println!("{} {}", chunk_data.len(), delta.len());
-                                    let delta_compressed =
-                                        zstd::encode_all(delta.as_slice(), 0).unwrap();
-                                        let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
-                                        self.delta_stored += 1;
+                            );
 
-                                }
-                                (base_chunk, Some(manifest)) => {
-                                    let delta = self
-                                        .encoder
-                                        .encode_with_manifest(chunk_data, base_chunk, manifest);
+                            let data = entry.get_data().to_vec();
+
+                            match entry.get_manifest() {
+                                Some(manifest) => {
+                                    let delta = self.encoder.encode_with_manifest(
+                                        chunk_data,
+                                        entry.get_data(),
+                                        manifest,
+                                    );
                                     let delta_compressed =
                                         zstd::encode_all(delta.as_slice(), 0).unwrap();
                                     let simple_compressed =
@@ -105,11 +119,35 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                             .insert(*hash, Entry::from(chunk_data.clone()));
                                     }
                                 }
+                                None => {
+                                    /*
+                                    let fp_table = E::generate_fp_table(&data);
+                                    let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
+
+                                    let delta = self
+                                        .encoder
+                                        .encode_with_manifest(chunk_data, &data, &fp_table.unwrap());
+                                        */
+
+                                    //let delta = self.encoder.encode(chunk_data, &data);
+
+                                    //let delta_compressed =
+                                    //   zstd::encode_all(delta.as_slice(), 0).unwrap();
+
+
+                                    // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
+                                    let delta_compressed = data;
+
+                                    let _ = self.target_map.insert(*hash, delta_compressed);
+                                    self.delta_bases.insert(*hash, base_hash.hash);
+                                    self.delta_stored += 1;
+                                }
                             }
                         }
                         None => {
                             // let fp_table = E::generate_fp_table(&chunk.as_bytes());
                             let fp_table = None;
+                            // let chunk_data = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
                             self.target_map.insert(*hash, chunk_data.clone());
                             let _ = &self
                                 .manifest_base
@@ -168,12 +206,23 @@ impl<
             metadata_manager: MetadataManager::new(tier_config, lifecycle_configs, &search_config),
             encoder,
             fp_threshold: 0.9,
+            naive: false,
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
             manifest_base: MockRocksDBMap::new(),
             target_map: HashMap::new(),
         }
+    }
+
+    /// Switches between the optimized single-pass and baseline two-pass
+    /// super-feature computation.
+    ///
+    /// When `true`, super-features for each chunk are computed with a second
+    /// full scan of the chunk data (`generate`); when `false` (default), raw
+    /// features collected during chunking are reused (`generate_from_raw`).
+    pub fn set_naive(&mut self, naive: bool) {
+        self.naive = naive;
     }
 }
 

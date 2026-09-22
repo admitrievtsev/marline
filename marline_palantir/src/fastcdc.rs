@@ -96,11 +96,21 @@ pub const MASKS: [u64; 26] = [
     0x0000db3777577000, // unused except for NC 3
 ];
 
+#[allow(dead_code)]
 const LINEAR_COEFFICIENTS: [u64; 12] = [
-    0xd7fd1fd1945f2195, 0xc640583680d99bfe, 0x94d558e493c54fc7,
-    0x502dea2971827042, 0x5500d70527c4bb8e, 0xe3ef2d5ac73c2226,
-    0x8e3e4221d3614413, 0x126a2c06ab5a83cb, 0xaa329b29e08eb499,
-    0x40b5ac5127acaa29, 0xabb20fee404807eb, 0x3b5d3c7d207e37dc];
+    0xd7fd1fd1945f2195,
+    0xc640583680d99bfe,
+    0x94d558e493c54fc7,
+    0x502dea2971827042,
+    0x5500d70527c4bb8e,
+    0xe3ef2d5ac73c2226,
+    0x8e3e4221d3614413,
+    0x126a2c06ab5a83cb,
+    0xaa329b29e08eb499,
+    0x40b5ac5127acaa29,
+    0xabb20fee404807eb,
+    0x3b5d3c7d207e37dc,
+];
 
 //
 // GEAR contains seemingly random numbers which are created by computing the
@@ -293,7 +303,7 @@ pub fn cut(
     mask_l: u64,
     mask_s_ls: u64,
     mask_l_ls: u64,
-) -> (u64, usize, [u32;12]) {
+) -> (u64, usize, [u32; 12]) {
     cut_gear(
         source, min_size, avg_size, max_size, mask_s, mask_l, mask_s_ls, mask_l_ls, &GEAR, &GEAR_LS,
     )
@@ -347,21 +357,19 @@ pub fn cut_gear(
 
         if hash & mask == 0 {
             for (i, feature) in features.iter_mut().enumerate() {
-                let transform =
-                    LINEAR_COEFFICIENTS[i].wrapping_mul(hash
-                        % (1u64 << 32)) as u32;
+                let transform = LINEAR_COEFFICIENTS[i].wrapping_mul(hash % (1u64 << 32)) as u32;
                 if *feature > transform {
                     *feature = transform;
                 }
             }
         }
 
+
         index += 1;
     }
     while index < remaining / 2 {
         let a = index * 2;
         hash = (hash << 2).wrapping_add(gear_ls[source[a] as usize]);
-
 
         if (hash & mask_l_ls) == 0 {
             return (hash, a, features);
@@ -372,11 +380,10 @@ pub fn cut_gear(
             return (hash, a + 1, features);
         }
 
+
         if hash & mask == 0 {
             for (i, feature) in features.iter_mut().enumerate() {
-                let transform =
-                    LINEAR_COEFFICIENTS[i].wrapping_mul(hash
-                        % (1u64 << 32)) as u32;
+                let transform = LINEAR_COEFFICIENTS[i].wrapping_mul(hash % (1u64 << 32)) as u32;
                 if *feature > transform {
                     *feature = transform;
                 }
@@ -389,6 +396,48 @@ pub fn cut_gear(
     // If all else fails, return the largest chunk. This will happen with
     // pathological data, such as all zeroes.
     (hash, remaining, features)
+}
+
+/// Computes the 12 raw features for `source` with the same gear-hash scan
+/// that [`cut_gear`] performs while chunking: bytes from `min_size` onward,
+/// two bytes per step, sampling mask `0x7F`, fixed linear coefficients.
+///
+/// This is the baseline "two-pass" way to obtain features — chunk first, then
+/// re-scan each chunk's data. The result must be identical to the features
+/// collected during the single pass of [`cut_gear`].
+pub fn collect_raw_features(source: &[u8], min_size: usize) -> [u32; 12] {
+    let mut features = [u32::MAX; 12];
+    let mask = (1u64 << 7) - 1;
+    let mut hash: u64 = 0;
+    let mut index = min_size / 2;
+    let half = source.len() / 2;
+    while index < half {
+        let a = index * 2;
+        hash = (hash << 2).wrapping_add(GEAR_LS[source[a] as usize]);
+
+        if hash & mask == 0 {
+            for (i, feature) in features.iter_mut().enumerate() {
+                let transform = LINEAR_COEFFICIENTS[i].wrapping_mul(hash % (1u64 << 32)) as u32;
+                if *feature > transform {
+                    *feature = transform;
+                }
+            }
+        }
+
+        hash = hash.wrapping_add(GEAR[source[a + 1] as usize]);
+
+        if hash & mask == 0 {
+            for (i, feature) in features.iter_mut().enumerate() {
+                let transform = LINEAR_COEFFICIENTS[i].wrapping_mul(hash % (1u64 << 32)) as u32;
+                if *feature > transform {
+                    *feature = transform;
+                }
+            }
+        }
+
+        index += 1;
+    }
+    features
 }
 
 // Rounded base-2 logarithm; matches the behavior pre-4.0.0 so that mask
@@ -473,11 +522,11 @@ pub struct Chunk {
 ///
 /// ```no_run
 /// use std::fs;
-/// use fastcdc::v2020;
+/// use marline_palantir::fastcdc;
 /// let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
-/// let chunker = v2020::FastCDC::new(&contents, 8192, 16384, 65535);
-/// for entry in chunker {
-///     println!("offset={} size={}", entry.offset, entry.length);
+/// let chunker = fastcdc::FastCDC::new(&contents, 8192, 16384, 65535);
+/// for (chunk, _features) in chunker {
+///     println!("offset={} size={}", chunk.offset, chunk.length);
 /// }
 /// ```
 ///
@@ -572,7 +621,7 @@ impl<'a> FastCDC<'a> {
     /// minimum chunk size, at which point this function returns a hash of 0 and
     /// the cut point is the end of the source data.
     ///
-    pub fn cut(&self, start: usize, remaining: usize) -> (u64, usize, [u32;12]) {
+    pub fn cut(&self, start: usize, remaining: usize) -> (u64, usize, [u32; 12]) {
         let end = start + remaining;
         let (hash, count, rf) = cut_gear(
             &self.source[start..end],
@@ -591,9 +640,9 @@ impl<'a> FastCDC<'a> {
 }
 
 impl Iterator for FastCDC<'_> {
-    type Item = (Chunk, [u32;12]);
+    type Item = (Chunk, [u32; 12]);
 
-    fn next(&mut self) -> Option<(Chunk, [u32;12])> {
+    fn next(&mut self) -> Option<(Chunk, [u32; 12])> {
         if self.remaining == 0 {
             None
         } else {
@@ -684,12 +733,12 @@ pub struct ChunkData {
 ///
 /// ```no_run
 /// # use std::fs::File;
-/// # use fastcdc::v2020::StreamCDC;
+/// use marline_palantir::fastcdc::StreamCDC;
 /// let source = File::open("test/fixtures/SekienAkashita.jpg").unwrap();
 /// let chunker = StreamCDC::new(source, 4096, 16384, 65535);
 /// for result in chunker {
 ///     let chunk = result.unwrap();
-///     println!("offset={} length={}", chunk.offset, chunk.length);
+///     println!("offset={} length={}", chunk.0.offset, chunk.0.length);
 /// }
 /// ```
 ///
@@ -846,7 +895,7 @@ impl<R: Read> StreamCDC<R> {
                 let offset = self.processed;
                 self.processed += count as u64;
                 let data = self.drain_bytes(count)?;
-                let rf = [0;12];
+                let rf = [0; 12];
                 Ok((ChunkData { hash, offset, length: count, data }, rf))
             }
         }
@@ -854,9 +903,9 @@ impl<R: Read> StreamCDC<R> {
 }
 
 impl<R: Read> Iterator for StreamCDC<R> {
-    type Item = Result<(ChunkData, [u32;12]), Error>;
+    type Item = Result<(ChunkData, [u32; 12]), Error>;
 
-    fn next(&mut self) -> Option<Result<(ChunkData, [u32;12]), Error>> {
+    fn next(&mut self) -> Option<Result<(ChunkData, [u32; 12]), Error>> {
         let slice = self.read_chunk();
         if let Err(Error::Empty) = slice {
             None
@@ -925,6 +974,31 @@ mod tests {
         let chunker = FastCDC::new(&source, 1_048_576, 4_194_304, 16_777_216);
         assert_eq!(chunker.mask_l, MASKS[21]);
         assert_eq!(chunker.mask_s, MASKS[23]);
+    }
+
+    #[test]
+    fn test_collect_raw_features_matches_single_pass() {
+        let mut seed = 0x12345678u32;
+        let mut data = vec![0u8; 1 << 20];
+        for b in data.iter_mut() {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *b = (seed >> 16) as u8;
+        }
+
+        for &(min_size, avg_size, max_size) in
+            &[(512usize, 1024, 2048), (4096, 8192, 16384), (131072, 262144, 524288)]
+        {
+            let chunker = FastCDC::new(&data, min_size, avg_size, max_size);
+            for (chunk, rf) in chunker {
+                let slice = &data[chunk.offset..chunk.offset + chunk.length];
+                let rf2 = collect_raw_features(slice, min_size);
+                assert_eq!(
+                    rf, rf2,
+                    "two-pass features differ at offset {} (min={min_size})",
+                    chunk.offset
+                );
+            }
+        }
     }
 
     #[test]
@@ -1139,7 +1213,7 @@ mod tests {
             (2504464741100432583, 17320),
         ];
         for (e_hash, e_length) in expected.iter() {
-            let (hash, pos,_) = chunker.cut(cursor, remaining);
+            let (hash, pos, _) = chunker.cut(cursor, remaining);
             assert_eq!(hash, *e_hash);
             assert_eq!(pos, cursor + e_length);
             cursor = pos;
