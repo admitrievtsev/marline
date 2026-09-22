@@ -510,7 +510,7 @@ pub struct Chunk {
 /// ```no_run
 /// use std::fs;
 /// use marline_palantir::fastcdc;
-/// let contents = fs::read("test/fixtures/SekienAkashita.jpg").unwrap();
+/// let contents = fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = fastcdc::FastCDC::new(&contents, 8192, 16384, 65535);
 /// for (chunk, _features) in chunker {
 ///     println!("offset={} size={}", chunk.offset, chunk.length);
@@ -721,7 +721,7 @@ pub struct ChunkData {
 /// ```no_run
 /// # use std::fs::File;
 /// use marline_palantir::fastcdc::StreamCDC;
-/// let source = File::open("test/fixtures/SekienAkashita.jpg").unwrap();
+/// let source = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = StreamCDC::new(source, 4096, 16384, 65535);
 /// for result in chunker {
 ///     let chunk = result.unwrap();
@@ -1007,7 +1007,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_16k_chunks() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker = FastCDC::new(&contents, 4096, 16384, 65535);
@@ -1032,7 +1033,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_16k_chunks_seed_666() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker =
@@ -1059,7 +1061,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_32k_chunks() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker = FastCDC::new(&contents, 8192, 32768, 131072);
@@ -1079,7 +1082,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_64k_chunks() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker = FastCDC::new(&contents, 16384, 65536, 262144);
@@ -1105,7 +1109,8 @@ mod tests {
 
     #[test]
     fn test_iter_sekien_16k_chunks() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         // The digest values are not needed here, but they serve to validate
@@ -1160,7 +1165,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_16k_nc_0() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker = FastCDC::with_level(&contents, 4096, 16384, 65535, Normalization::Level0);
@@ -1185,7 +1191,8 @@ mod tests {
 
     #[test]
     fn test_cut_sekien_16k_nc_3() {
-        let read_result = fs::read("test/fixtures/SekienAkashita.jpg");
+        let read_result =
+            fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(read_result.is_ok());
         let contents = read_result.unwrap();
         let chunker = FastCDC::with_level(&contents, 8192, 16384, 32768, Normalization::Level3);
@@ -1217,7 +1224,8 @@ mod tests {
 
     #[test]
     fn test_stream_sekien_16k_chunks() {
-        let file_result = File::open("test/fixtures/SekienAkashita.jpg");
+        let file_result =
+            File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(file_result.is_ok());
         let file = file_result.unwrap();
         // The set of expected results should match the non-streaming version.
@@ -1272,7 +1280,8 @@ mod tests {
 
     #[test]
     fn test_stream_sekien_16k_chunks_seed_666() {
-        let file_result = File::open("test/fixtures/SekienAkashita.jpg");
+        let file_result =
+            File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg"));
         assert!(file_result.is_ok());
         let file = file_result.unwrap();
         // The set of expected results should match the non-streaming version.
