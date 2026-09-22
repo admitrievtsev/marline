@@ -59,7 +59,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
-        let chunker = FastCDC::new(&data, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
+        let chunker = FastCDC::new(data, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
         // let chunker = FastCDC::new(&data, 1024 * 8, 16 * 1024, 32 * 1024);
 
         for (chunk, sf_raw) in chunker {
@@ -133,7 +133,6 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
 
                                     //let delta_compressed =
                                     //   zstd::encode_all(delta.as_slice(), 0).unwrap();
-
 
                                     // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
                                     let delta_compressed = data;

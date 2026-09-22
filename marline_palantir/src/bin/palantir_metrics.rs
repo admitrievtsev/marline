@@ -182,9 +182,9 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
 
 fn ensure_datasets() -> Vec<std::path::PathBuf> {
     const KERNEL_VERSIONS: [&str; 5] =
-//   ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7", "linux-3.4.8", "linux-3.4.9"];
-//       ["linux-3.4.5", "linux-3.5.6", "linux-3.6.7", "linux-3.7.8", "linux-3.8.9"];
-    ["linux-3.4.5", "linux-3.6.6", "linux-3.8.7", "linux-3.10.8", "linux-3.12.9"];
+        //   ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7", "linux-3.4.8", "linux-3.4.9"];
+        //       ["linux-3.4.5", "linux-3.5.6", "linux-3.6.7", "linux-3.7.8", "linux-3.8.9"];
+        ["linux-3.4.5", "linux-3.6.6", "linux-3.8.7", "linux-3.10.8", "linux-3.12.9"];
 
     let base = match std::env::var_os("MARLINE_DATA_DIR") {
         Some(v) => std::path::PathBuf::from(v),

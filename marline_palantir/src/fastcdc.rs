@@ -345,7 +345,6 @@ pub fn cut_gear(
         let a = index * 2;
         hash = (hash << 2).wrapping_add(gear_ls[source[a] as usize]);
 
-
         if (hash & mask_s_ls) == 0 {
             return (hash, a, features);
         }
@@ -364,7 +363,6 @@ pub fn cut_gear(
             }
         }
 
-
         index += 1;
     }
     while index < remaining / 2 {
@@ -379,7 +377,6 @@ pub fn cut_gear(
         if (hash & mask_l) == 0 {
             return (hash, a + 1, features);
         }
-
 
         if hash & mask == 0 {
             for (i, feature) in features.iter_mut().enumerate() {
@@ -414,16 +411,6 @@ pub fn collect_raw_features(source: &[u8], min_size: usize) -> [u32; 12] {
     while index < half {
         let a = index * 2;
         hash = (hash << 2).wrapping_add(GEAR_LS[source[a] as usize]);
-
-        if hash & mask == 0 {
-            for (i, feature) in features.iter_mut().enumerate() {
-                let transform = LINEAR_COEFFICIENTS[i].wrapping_mul(hash % (1u64 << 32)) as u32;
-                if *feature > transform {
-                    *feature = transform;
-                }
-            }
-        }
-
         hash = hash.wrapping_add(GEAR[source[a + 1] as usize]);
 
         if hash & mask == 0 {

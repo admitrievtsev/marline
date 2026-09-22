@@ -291,8 +291,7 @@ pub fn gdelta_diff_new(
             if equal_part_len >= word_size {
                 let insert_data_len = j - anchor;
                 if insert_data_len > 0 {
-                    let insert_data =
-                        &new_chunk[anchor as usize..((anchor + insert_data_len) as usize)];
+                    let insert_data = &new_chunk[anchor..(anchor + insert_data_len)];
                     let mut insert_instruction = insert_data_len.to_ne_bytes();
                     insert_instruction[2] |= 1 << 7;
                     delta_code.extend_from_slice(&insert_instruction[..3]);
@@ -308,7 +307,7 @@ pub fn gdelta_diff_new(
                 j = anchor - 1;
                 if j < new_len - word_size {
                     for k in anchor..(anchor + word_size - 1) {
-                        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[k as usize] as usize]);
+                        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[k] as usize]);
                     }
                 }
             }
@@ -316,7 +315,7 @@ pub fn gdelta_diff_new(
 
         if j >= new_len - word_size {
             let insert_data_len = new_len - anchor;
-            let insert_data = &new_chunk[anchor as usize..((anchor + insert_data_len) as usize)];
+            let insert_data = &new_chunk[anchor..(anchor + insert_data_len)];
             let mut insert_instruction = insert_data_len.to_ne_bytes();
             insert_instruction[2] |= 1 << 7;
             delta_code.extend_from_slice(&insert_instruction[..3]);
