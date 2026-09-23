@@ -249,6 +249,85 @@ pub fn gdelta_diff(new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
     delta_code
 }
 
+/// Compute delta between `new_chunk` and `base_chunk` using gdelta algorithm.
+/// Returns delta as byte vector (INSERT/COPY instructions).
+pub fn gdelta_diff_new(
+    new_chunk: &[u8],
+    base_chunk: &[u8],
+    manifest: &HashMap<u64, u32>,
+) -> Vec<u8> {
+    let base_len = base_chunk.len();
+
+    let new_len = new_chunk.len();
+    let word_size: usize = 16;
+    if new_len < word_size || base_len < word_size {
+        return new_chunk.to_vec();
+    }
+    let move_bts: usize = 64 / word_size;
+    let mask_bts: usize = (base_chunk.len() as f64).log2() as usize;
+
+    let mut delta_code = Vec::new();
+    let mut anchor: usize = 0;
+    let mut fp = 0u64;
+
+    for j in 0..(word_size - 1) {
+        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[j] as usize]);
+    }
+
+    let mut j = 0;
+    while j + word_size <= new_len {
+        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[j + word_size - 1] as usize]);
+        let word_hash: u64 = fp >> (64 - mask_bts);
+
+        if let Some(&offset) = manifest.get(&(word_hash)) {
+            let mut equal_part_len: usize = 0;
+            for k in 0..min(base_len - offset as usize, new_len - j) {
+                if base_chunk[offset as usize + k] != new_chunk[j + k] {
+                    break;
+                }
+                equal_part_len += 1;
+            }
+
+            if equal_part_len >= word_size {
+                let insert_data_len = j - anchor;
+                if insert_data_len > 0 {
+                    let insert_data = &new_chunk[anchor..(anchor + insert_data_len)];
+                    let mut insert_instruction = insert_data_len.to_ne_bytes();
+                    insert_instruction[2] |= 1 << 7;
+                    delta_code.extend_from_slice(&insert_instruction[..3]);
+                    delta_code.extend_from_slice(insert_data);
+                }
+
+                let copy_instruction_len = &equal_part_len.to_ne_bytes()[..3];
+                let copy_instruction_offset = &offset.to_ne_bytes()[..3];
+                delta_code.extend_from_slice(copy_instruction_len);
+                delta_code.extend_from_slice(copy_instruction_offset);
+
+                anchor = j + equal_part_len;
+                j = anchor - 1;
+                if j < new_len - word_size {
+                    for k in anchor..(anchor + word_size - 1) {
+                        fp = (fp << move_bts).wrapping_add(GEAR[new_chunk[k] as usize]);
+                    }
+                }
+            }
+        }
+
+        if j >= new_len - word_size {
+            let insert_data_len = new_len - anchor;
+            let insert_data = &new_chunk[anchor..(anchor + insert_data_len)];
+            let mut insert_instruction = insert_data_len.to_ne_bytes();
+            insert_instruction[2] |= 1 << 7;
+            delta_code.extend_from_slice(&insert_instruction[..3]);
+            delta_code.extend_from_slice(insert_data);
+        }
+
+        j += 1;
+    }
+
+    delta_code
+}
+
 // Gear table taken from https://github.com/nlfiedler/fastcdc-rs
 #[rustfmt::skip]
 pub(crate) const GEAR: [u64; 256] = [

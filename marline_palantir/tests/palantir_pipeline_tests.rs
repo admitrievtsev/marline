@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
 use chunkfs::hashers::Sha256Hasher;
-use chunkfs::{Data, DataContainer, Database, Hasher, Scrub};
+use chunkfs::{Data, DataContainer, Hasher, Scrub};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
 use marline_palantir::metadata_manager::MetadataManager;
-use marline_palantir::mock_rocksdb::MockRocksDBMap;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
-use marline_palantir::sf_generator::PalantirHasher;
-use marline_palantir::types::{BlockID, Chunk, SuperFeatureGenerator, TierConfig};
+use marline_palantir::sf_generator::{PalantirHasher, SuperFeatureGenerator};
+use marline_palantir::types::{BlockID, Chunk, TierConfig};
 
 fn hash_data(data: &[u8]) -> [u8; 32] {
     Sha256Hasher::default().hash(data)
@@ -67,15 +66,15 @@ fn similar_chunks() {
     database.insert(hash_base, DataContainer::from(base.clone()));
     database.insert(hash_similar, DataContainer::from(similar.clone()));
 
-    let mut target_map = MockRocksDBMap::new();
+    let mut target_map = HashMap::new();
     let result = scrubber.scrub(&mut database, &mut target_map).unwrap();
 
     assert_eq!(result.processed_data, base.len() + similar.len());
     assert_eq!(target_map.len(), 2);
 
     let delta_count = [(&hash_base, &base), (&hash_similar, &similar)]
-        .iter()
-        .filter(|(h, data)| target_map.get(h).unwrap().len() < data.len())
+        .into_iter()
+        .filter(|(h, data)| target_map.get(*h).unwrap().len() < data.len())
         .count();
     assert!(
         delta_count >= 1,

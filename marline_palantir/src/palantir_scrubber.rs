@@ -1,17 +1,17 @@
-use std::collections::HashMap;
-use std::hash::Hash;
-use std::io;
-
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
 use marline_scrub::decoder::{Decoder, GdeltaDecoder};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::io;
 
 use crate::encoder::PalantirEncoder;
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
-use crate::mock_rocksdb::MockRocksDBMap;
-use crate::types::{BlockID, Chunk, SuperFeatureGenerator, TierConfig};
+use crate::mock_rocksdb::{Entry, MockRocksDBMap};
+use crate::sf_generator::SuperFeatureGenerator;
+use crate::types::{BlockID, Chunk, TierConfig};
 use marline_index::heuristic_index::SearchConfig;
 use marline_index::index::IndexError;
 
@@ -46,6 +46,7 @@ pub struct PalantirScrubber<
     delta_stored: u64,
     /// Tracks chunk hash → base hash for stored deltas (chain rebuild).
     delta_bases: HashMap<H, H>,
+    manifest_base: MockRocksDBMap,
 }
 
 impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: usize>
@@ -82,6 +83,7 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
+            manifest_base: MockRocksDBMap::new(),
         }
     }
 
@@ -106,7 +108,7 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
     }
 }
 
-impl<B, S, E, const N: usize> Scrub<[u8; 32], B, [u8; 32], MockRocksDBMap>
+impl<B, S, E, const N: usize> Scrub<[u8; 32], B, [u8; 32], HashMap<[u8; 32], Vec<u8>>>
     for PalantirScrubber<S, [u8; 32], E, N>
 where
     B: IterableDatabase<[u8; 32], DataContainer<[u8; 32]>>,
@@ -116,7 +118,7 @@ where
     fn scrub<'a>(
         &mut self,
         database: &mut B,
-        target_map: &mut MockRocksDBMap,
+        target_map: &mut HashMap<[u8; 32], Vec<u8>>,
     ) -> io::Result<ScrubMeasurements>
     where
         [u8; 32]: 'a,
@@ -135,9 +137,26 @@ where
                         None => {
                             match self.metadata_manager.lookup_super_features(&super_features) {
                                 Some((base_hash, _)) => {
-                                    match decoder(target_map, &self.delta_bases, &base_hash.hash) {
-                                        Ok(base_data) => {
-                                            let delta = self.encoder.encode(chunk_data, &base_data);
+                                    match get_manifest(
+                                        &self.manifest_base,
+                                        &self.delta_bases,
+                                        &base_hash.hash,
+                                    ) {
+                                        (base_chunk, None) => {
+                                            let delta = self.encoder.encode(chunk_data, base_chunk);
+                                            let delta_compressed = delta.clone();
+                                            let simple_compressed = delta.clone();
+                                            let _ratio = delta_compressed.len() as f64
+                                                / simple_compressed.len() as f64;
+
+                                            let _ = &mut target_map.insert(*hash, delta_compressed);
+                                            self.delta_bases.insert(*hash, base_hash.hash);
+                                            self.delta_stored += 1;
+                                        }
+                                        (base_chunk, Some(manifest)) => {
+                                            let delta = self.encoder.encode_with_manifest(
+                                                chunk_data, base_chunk, manifest,
+                                            );
                                             let delta_compressed =
                                                 zstd::encode_all(delta.as_slice(), 0)?;
                                             let simple_compressed =
@@ -145,21 +164,28 @@ where
                                             let ratio = delta_compressed.len() as f64
                                                 / simple_compressed.len() as f64;
                                             if ratio < self.fp_threshold {
-                                                target_map.insert(*hash, delta_compressed)?;
+                                                let _ =
+                                                    &mut target_map.insert(*hash, delta_compressed);
                                                 self.delta_bases.insert(*hash, base_hash.hash);
                                                 self.delta_stored += 1;
                                             } else {
-                                                target_map.insert(*hash, chunk_data.clone())?;
+                                                target_map.insert(*hash, chunk_data.clone());
+                                                let _ = &mut self.manifest_base.insert(
+                                                    *hash,
+                                                    Entry::from(chunk_data.clone()),
+                                                )?;
                                             }
-                                        }
-                                        Err(_) => {
-                                            target_map.insert(*hash, chunk_data.clone())?;
                                         }
                                     }
                                     processed_data += chunk_data.len();
                                 }
                                 None => {
-                                    target_map.insert(*hash, chunk_data.clone())?;
+                                    // let fp_table = E::generate_fp_table(&chunk.as_bytes());
+                                    let fp_table = None;
+                                    target_map.insert(*hash, chunk_data.clone());
+                                    let _ = &self
+                                        .manifest_base
+                                        .insert(*hash, Entry::new(fp_table, chunk_data.clone()))?;
                                     processed_data += chunk_data.len();
                                 }
                             }
@@ -187,6 +213,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn decoder(
     target_map: &MockRocksDBMap,
     delta_bases: &HashMap<[u8; 32], [u8; 32]>,
@@ -198,10 +225,42 @@ fn decoder(
         chain.push(cur);
         cur = base;
     }
-    let mut data = target_map.get(&cur)?;
+    let mut data = target_map.get(&cur)?.get_data().clone();
     for &dh in chain.iter().rev() {
-        let compressed = target_map.get(&dh)?;
-        data = GdeltaDecoder::new(true).decode_chunk(data, &compressed);
+        let compressed = target_map.get_2(&dh).unwrap().get_data();
+        data = GdeltaDecoder::new(true).decode_chunk(data, compressed);
     }
     Ok(data)
+}
+
+pub(crate) fn get_manifest<'a>(
+    target_map: &'a MockRocksDBMap,
+    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
+    hash: &[u8; 32],
+) -> (&'a Vec<u8>, &'a Option<HashMap<u64, u32>>) {
+    let mut chain = Vec::new();
+    let mut cur = *hash;
+    while let Some(&base) = delta_bases.get(&cur) {
+        chain.push(cur);
+        cur = base;
+    }
+
+    let base_chunk = target_map.get_2(&cur).unwrap().get_data();
+    let manifest = target_map.get_2(&cur).unwrap().get_manifest();
+    (base_chunk, manifest)
+}
+
+pub(crate) fn get_entry<'a>(
+    target_map: &'a mut MockRocksDBMap,
+    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
+    hash: &[u8; 32],
+) -> &'a mut Entry {
+    let mut chain = Vec::new();
+    let mut cur = *hash;
+    while let Some(&base) = delta_bases.get(&cur) {
+        chain.push(cur);
+        cur = base;
+    }
+
+    target_map.get_2_mut(&cur).unwrap()
 }
