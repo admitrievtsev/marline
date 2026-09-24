@@ -5,7 +5,6 @@
   **Advanced Similarity-Based Chunking for Efficient Data Deduplication**
 
   [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-  [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
   [![Build Status](https://github.com/yourusername/marline/workflows/Rust/badge.svg)](.github/workflows/rust.yml)
 
   [Documentation](https://docs.rs/marline) | [Examples](#examples) | [Contributing](#contributing)
@@ -173,7 +172,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgments
 
