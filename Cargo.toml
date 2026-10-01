@@ -1,5 +1,5 @@
 [workspace]
-members = ["marline", "marline_delta", "marline_scrub", "marline_palantir", "marline_index", "marline_sketcher"]
+members = ["marline", "marline_delta", "marline_scrub", "marline_palantir", "marline_index", "marline_sketcher", "marline_cdc"]
 resolver = "2"
 
 [workspace.package]
