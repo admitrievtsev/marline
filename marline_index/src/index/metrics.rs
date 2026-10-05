@@ -32,27 +32,23 @@ impl<K: Clone + Eq + Hash + Send + Sync> MetricsMap<K> {
         Self { data: RwLock::new(HashMap::new()) }
     }
 
-    /// Applies `update_fn` to every metric, then removes entries where `cleanup_fn` returns `true`.
+    /// Applies `update_fn` to every metric and returns the keys for which
+    /// `cleanup_fn` returns `true`.
     ///
-    /// This is a convenience method for garbage-collecting stale entries
-    /// without holding the lock across iterator boundaries.
-    pub fn update_and_clean(
+    /// Matching metrics are left in place so callers can remove derived state
+    /// (e.g. inverted-index entries) before dropping the metrics themselves.
+    pub fn update_and_collect(
         &self,
         update_fn: &mut dyn FnMut(&mut Metric),
         cleanup_fn: &dyn Fn(Metric) -> bool,
-    ) {
+    ) -> Vec<K> {
         let mut data = self.data.write().unwrap();
 
         for metric in data.values_mut() {
             update_fn(metric);
         }
 
-        let to_remove: Vec<K> =
-            data.iter().filter(|(_, &m)| cleanup_fn(m)).map(|(k, _)| k.clone()).collect();
-
-        for key in to_remove {
-            data.remove(&key);
-        }
+        data.iter().filter(|(_, &m)| cleanup_fn(m)).map(|(k, _)| k.clone()).collect()
     }
 }
 
@@ -130,17 +126,23 @@ mod tests {
     }
 
     #[test]
-    fn update_and_clean_removes_entries_matching_cleanup() {
+    fn update_and_collect_returns_entries_matching_cleanup() {
         let m = MetricsMap::new();
         m.set_metric(&1, 1);
         m.set_metric(&2, 5);
         m.set_metric(&3, 10);
 
-        // Increment all metrics by 1, remove those > 7
-        m.update_and_clean(&mut |m: &mut Metric| *m += 1, &|m: Metric| m > 7);
+        // Increment all metrics by 1, collect those > 7
+        let removed = m.update_and_collect(&mut |m: &mut Metric| *m += 1, &|m: Metric| m > 7);
 
+        assert_eq!(removed, vec![3]);
         assert_eq!(m.get_metric(&1), Some(2));
         assert_eq!(m.get_metric(&2), Some(6));
+        assert_eq!(m.get_metric(&3), Some(11));
+
+        for key in &removed {
+            m.remove_metric(key);
+        }
         assert_eq!(m.get_metric(&3), None);
     }
 }

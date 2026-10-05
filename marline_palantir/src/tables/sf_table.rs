@@ -129,17 +129,126 @@ impl<H: ChunkHash + Send + Sync, const N: usize> SFTable<H, N> {
             features.iter().map(SuperFeature::value).collect::<Vec<_>>().try_into().ok()?;
         let query = U32Sketch::new(vals);
         let result = self.index.get(&query).unwrap_or(None)?;
-        let old = self.metrics.get_metric(&result).unwrap_or(0);
+        let old = self.metrics.get_metric(&result)?;
         self.metrics.set_metric(&result, f(old));
         Some(result)
     }
 
+    /// Updates every stored metric and drops the blocks whose updated metric
+    /// satisfies `cleanup_fn`.
+    ///
+    /// Returns the number of blocks evicted from the index.
     pub fn update_and_clean(
         &self,
         mut update_fn: impl FnMut(Metric) -> Metric,
         cleanup_fn: impl Fn(Metric) -> bool,
-    ) -> Result<(), IndexError> {
-        self.metrics.update_and_clean(&mut |m| *m = update_fn(*m), &|m| cleanup_fn(m));
-        Ok(())
+    ) -> Result<usize, IndexError> {
+        let removed =
+            self.metrics.update_and_collect(&mut |m| *m = update_fn(*m), &|m| cleanup_fn(m));
+
+        let mut count = 0;
+        let mut first_err: Option<IndexError> = None;
+        for block_id in &removed {
+            match self.index.remove(block_id) {
+                Ok(()) => {
+                    self.metrics.remove_metric(block_id);
+                    count += 1;
+                }
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+
+        first_err.map_or(Ok(count), Err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type TestTable = SFTable<u64, 3>;
+
+    fn block(hash: u64) -> BlockID<u64> {
+        BlockID::new(hash)
+    }
+
+    fn features(values: [u32; 3]) -> [SuperFeature; 3] {
+        [
+            SuperFeature::new(0, values[0]),
+            SuperFeature::new(1, values[1]),
+            SuperFeature::new(2, values[2]),
+        ]
+    }
+
+    #[test]
+    fn update_and_clean_drops_entry_from_index() {
+        let table = TestTable::new(SearchConfig::default());
+        let a = block(1);
+        let feats = features([10, 20, 30]);
+
+        table.insert(&a, &feats, 1);
+
+        assert_eq!(table.nearest(&feats), Some(a.clone()));
+        assert_eq!(table.len(), 3);
+
+        table.update_and_clean(|m| m.saturating_sub(1), |m| m == 0).unwrap();
+
+        assert_eq!(table.get_key_metric(&a), None);
+        assert_eq!(table.nearest(&feats), None);
+        assert_eq!(table.len(), 0);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn update_and_clean_keeps_surviving_entries() {
+        let table = TestTable::new(SearchConfig::default());
+        let a = block(1);
+        let b = block(2);
+        let feats_a = features([10, 20, 30]);
+        let feats_b = features([40, 50, 60]);
+
+        table.insert(&a, &feats_a, 1);
+        table.insert(&b, &feats_b, 5);
+
+        table.update_and_clean(|m| m.saturating_sub(1), |m| m == 0).unwrap();
+
+        assert_eq!(table.get_key_metric(&a), None);
+        assert_eq!(table.nearest(&feats_a), None);
+
+        assert_eq!(table.get_key_metric(&b), Some(4));
+        assert_eq!(table.nearest(&feats_b), Some(b));
+        assert_eq!(table.len(), 3);
+    }
+
+    #[test]
+    fn expired_metric_is_not_resurrected_on_lookup() {
+        let table = TestTable::new(SearchConfig::default());
+        let a = block(1);
+        let feats = features([10, 20, 30]);
+
+        table.insert(&a, &feats, 1);
+        table.update_and_clean(|m| m.saturating_sub(1), |m| m == 0).unwrap();
+
+        assert_eq!(table.get_with_upd_metric(&feats, |m| m), None);
+        assert_eq!(table.get_key_metric(&a), None);
+        assert_eq!(table.len(), 0);
+    }
+
+    #[test]
+    fn repeated_cleanup_does_not_underflow() {
+        let table = TestTable::new(SearchConfig::default());
+        let a = block(1);
+        let feats = features([10, 20, 30]);
+
+        table.insert(&a, &feats, 2);
+
+        for _ in 0..5 {
+            table.update_and_clean(|m| m - 1, |m| m == 0).unwrap();
+        }
+
+        assert_eq!(table.get_key_metric(&a), None);
+        assert_eq!(table.nearest(&feats), None);
     }
 }
