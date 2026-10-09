@@ -3,12 +3,10 @@ use crate::error::PalantirError;
 use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
-use crate::mock_rocksdb::{Entry, MockRocksDBMap};
-use crate::palantir_scrubber::get_entry;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
-use chunkfs::{ChunkHash, Database};
 use marline_index::heuristic_index::SearchConfig;
+use marline_cdc::{ChunkHash, Database, MetrcisDatabase};
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -27,7 +25,7 @@ pub trait OnlineSBC<
 
     fn bytes_stored(&self) -> usize;
 }
-
+#[allow(dead_code)]
 pub struct PalantirOnline<
     S,
     H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
@@ -50,8 +48,8 @@ pub struct PalantirOnline<
     delta_stored: u64,
     /// Tracks chunk hash → base hash for stored deltas (chain rebuild).
     delta_bases: HashMap<H, H>,
-    manifest_base: MockRocksDBMap,
-    target_map: HashMap<H, Vec<u8>>,
+    /// Database stub.
+    db: MetrcisDatabase,
 }
 
 #[allow(unused_variables)]
@@ -87,70 +85,62 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
 
                     match self.metadata_manager.lookup_super_features(&super_features) {
                         Some((base_hash, _)) => {
-                            let entry = get_entry(
-                                &mut self.manifest_base,
-                                &self.delta_bases,
-                                &base_hash.hash,
-                            );
+                            // let entry = get_entry(
+                            //     &mut self.manifest_base,
+                            //     &self.delta_bases,
+                            //     &base_hash.hash,
+                            // );
 
-                            let data = entry.get_data().to_vec();
+                            // let data = entry.get_data().to_vec();
 
-                            match entry.get_manifest() {
-                                Some(manifest) => {
-                                    let delta = self.encoder.encode_with_manifest(
-                                        chunk_data,
-                                        entry.get_data(),
-                                        manifest,
-                                    );
-                                    let delta_compressed =
-                                        zstd::encode_all(delta.as_slice(), 0).unwrap();
-                                    let simple_compressed =
-                                        zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                                    let ratio = delta_compressed.len() as f64
-                                        / simple_compressed.len() as f64;
-                                    if ratio < self.fp_threshold {
-                                        let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
-                                        self.delta_stored += 1;
-                                    } else {
-                                        self.target_map.insert(*hash, chunk_data.clone());
-                                        let _ = &mut self
-                                            .manifest_base
-                                            .insert(*hash, Entry::from(chunk_data.clone()));
-                                    }
-                                }
-                                None => {
-                                    /*
-                                    let fp_table = E::generate_fp_table(&data);
-                                    let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
+                            // match entry.get_manifest() {
+                            //     Some(manifest) => {
+                            //         let delta = self.encoder.encode_with_manifest(
+                            //             chunk_data,
+                            //             entry.get_data(),
+                            //             manifest,
+                            //         );
+                            //         let delta_compressed =
+                            //             zstd::encode_all(delta.as_slice(), 0).unwrap();
+                            //         let simple_compressed =
+                            //             zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
+                            //         let ratio = delta_compressed.len() as f64
+                            //             / simple_compressed.len() as f64;
+                            //         if ratio < self.fp_threshold {
+                            //             let _ = self.db.insert(*hash, &delta_compressed);
+                            //             self.delta_bases.insert(*hash, base_hash.hash);
+                            //             self.delta_stored += 1;
+                            //         } else {
+                            //             self.db.insert(*hash, chunk_data);
+                            //         }
+                            //     }
+                            //     None => {
+                            //         /*
+                            //         let fp_table = E::generate_fp_table(&data);
+                            //         let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
 
-                                    let delta = self
-                                        .encoder
-                                        .encode_with_manifest(chunk_data, &data, &fp_table.unwrap());
-                                        */
+                            //         let delta = self
+                            //             .encoder
+                            //             .encode_with_manifest(chunk_data, &data, &fp_table.unwrap());
+                            //             */
 
-                                    //let delta = self.encoder.encode(chunk_data, &data);
+                            //         //let delta = self.encoder.encode(chunk_data, &data);
 
-                                    //let delta_compressed =
-                                    //   zstd::encode_all(delta.as_slice(), 0).unwrap();
+                            //         //let delta_compressed =
+                            //         //   zstd::encode_all(delta.as_slice(), 0).unwrap();
 
-                                    // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                                    let delta_compressed = data;
+                            //         // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
+                            //         let delta_compressed = data;
 
-                                    let _ = self.target_map.insert(*hash, delta_compressed);
-                                    self.delta_bases.insert(*hash, base_hash.hash);
-                                    self.delta_stored += 1;
-                                }
-                            }
+                            //         self.db.insert(*hash, chunk_data);
+                            //         self.delta_bases.insert(*hash, base_hash.hash);
+                            //         self.delta_stored += 1;
+                            //     }
+                            // }
                         }
                         None => {
-                            // let fp_table = E::generate_fp_table(&chunk.as_bytes());
-                            let fp_table = None;
                             // let chunk_data = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                            self.target_map.insert(*hash, chunk_data.clone());
-                            let _ = &self
-                                .manifest_base
-                                .insert(*hash, Entry::new(fp_table, chunk_data.clone()));
+                            self.db.insert(*hash, chunk_data);
                         }
                     }
 
@@ -162,11 +152,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
         Ok(())
     }
     fn bytes_stored(&self) -> usize {
-        let mut size = 0usize;
-        for val in self.target_map.values() {
-            size += val.len()
-        }
-        size
+        self.db.total_saved_bytes
     }
 }
 
@@ -209,8 +195,7 @@ impl<
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
-            manifest_base: MockRocksDBMap::new(),
-            target_map: HashMap::new(),
+            db: MetrcisDatabase::new(),
         }
     }
 

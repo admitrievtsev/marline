@@ -249,7 +249,7 @@ pub(crate) fn get_manifest<'a>(
     let manifest = target_map.get_2(&cur).unwrap().get_manifest();
     (base_chunk, manifest)
 }
-
+#[allow(dead_code)]
 pub(crate) fn get_entry<'a>(
     target_map: &'a mut MockRocksDBMap,
     delta_bases: &HashMap<[u8; 32], [u8; 32]>,
