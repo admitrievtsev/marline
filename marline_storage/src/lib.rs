@@ -6,18 +6,18 @@ pub trait Database<H: ChunkHash> {
     fn get(&self, hash: &H) -> Option<Vec<u8>>;
 }
 
-pub struct  MetrcisDatabase {
+pub struct  MetricsDatabase {
     pub total_saved_bytes: usize,
     pub unique_chunks_count: usize,
 }
 
-impl MetrcisDatabase {
+impl MetricsDatabase {
     pub fn new() -> Self {
         Self { total_saved_bytes: 0, unique_chunks_count: 0 }
     }
 }
 
-impl<H: ChunkHash> Database<H> for MetrcisDatabase {
+impl<H: ChunkHash> Database<H> for MetricsDatabase {
     fn insert(&mut self, _hash: H, data: &[u8]) {
         self.total_saved_bytes += data.len();
         self.unique_chunks_count += 1;

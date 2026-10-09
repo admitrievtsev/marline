@@ -6,7 +6,7 @@ use crate::metadata_manager::MetadataManager;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
 use marline_index::heuristic_index::SearchConfig;
-use marline_storage::{ChunkHash, Database, MetrcisDatabase};
+use marline_storage::{ChunkHash, Database, MetricsDatabase};
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -49,7 +49,7 @@ pub struct PalantirOnline<
     /// Tracks chunk hash → base hash for stored deltas (chain rebuild).
     delta_bases: HashMap<H, H>,
     /// Database stub.
-    db: MetrcisDatabase,
+    db: MetricsDatabase,
 }
 
 #[allow(unused_variables)]
@@ -195,7 +195,7 @@ impl<
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
-            db: MetrcisDatabase::new(),
+            db: MetricsDatabase::new(),
         }
     }
 
