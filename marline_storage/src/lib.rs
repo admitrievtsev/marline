@@ -1,18 +1,74 @@
 use std::collections::HashMap;
+use std::fmt::{Formatter};
 
 pub trait ChunkHash: Clone + Eq + std::hash::Hash + Send + Sync + Default + 'static {}
-impl ChunkHash  for [u8; 32] {}
+impl<T: Clone + Eq + std::hash::Hash + Send + Sync + Default + 'static> ChunkHash  for T {}
 
 pub trait Database<K, V> {
     fn insert(&mut self, key: K, value: V);
     fn get(&self, key: &K) -> Option<V>;
-    fn conteins(&self, key: &K) -> bool {
+    fn contains(&self, key: &K) -> bool {
         self.get(key).is_some()
     }
     fn remove(&mut self, key: &K) -> Option<V>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[derive(Clone)]
+pub enum Data<K> {
+    Chunk(Vec<u8>),
+    TargetChunk(Vec<K>),
+}
+
+impl<K> std::fmt::Debug for Data<K> {
+    fn fmt(&self, f:&mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Data::Chunk(chunk) => write!(f, "Chunk with len {}", chunk.len()),
+            Data::TargetChunk(keys) => write!(f, "TargetChunk with {} keys", keys.len()),
+        }
+    }
+}
+
+impl<K> Default for Data<K> {
+    fn default() -> Self {
+        Self::Chunk(Vec::new())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DataContainer<K>(pub Data<K>);
+
+impl<K> DataContainer<K> {
+    pub fn new(data: Data<K>) -> Self {
+        Self(data)
+    }
+
+    pub fn make_target(&mut self, keys: Vec<K>) {
+        self.0 = Data::TargetChunk(keys);
+    }
+
+    pub fn extract(&self) -> &Data<K> {
+        &self.0
+    }
+
+    pub fn extract_mut(&mut self) -> &mut Data<K> {
+        &mut self.0
+    }
+
+    pub fn unwrap_chunk(&self) -> &Vec<u8> {
+        match &self.0 {
+            Data::Chunk(chunk) => chunk,
+            Data::TargetChunk(_) => panic!("Target chunk found in DataContainer; expected simple chunk")
+        }
+    }
+}
+
+impl<K> From<Vec<u8>> for DataContainer<K> {
+    fn from(value: Vec<u8>) -> Self {
+        Self(Data::Chunk(value))
     }
 }
 
@@ -89,25 +145,25 @@ impl<H: ChunkHash> MetricsDatabase<H> {
         }
     }
 
-    /// Сохранение уникального базового чанка (сохраняем тело + учитываем размер)
+    /// Preserving the unique base chunk (storing the body + monitoring its size).
     pub fn insert(&mut self, hash: H, data: &[u8]) {
         self.total_saved_bytes += data.len();
         self.unique_chunks_count += 1;
         self.base_chunks.insert(hash, data.to_vec());
     }
 
-    /// Сохранение дельты (учитываем только размер сжатой дельты, экономим RAM)
+    /// Storing the delta (we only account for the size of the compressed delta, saving RAM).
     pub fn insert_delta(&mut self, _hash: H, delta: &[u8]) {
         self.total_saved_bytes += delta.len();
         self.delta_chunks_count += 1;
     }
 
-    /// Получение базового чанка для дельта-сжатия
+    /// Obtaining a base chunk for delta compression.
     pub fn get(&self, hash: &H) -> Option<Vec<u8>> {
         self.base_chunks.get(hash).cloned()
     }
 
-    /// Получение ссылки на базовый чанк без лишнего клонирования
+    /// Obtaining a reference to a base chunk without unnecessary cloning.
     pub fn get_ref(&self, hash: &H) -> Option<&[u8]> {
         self.base_chunks.get(hash).map(|v| v.as_slice())
     }
@@ -147,7 +203,7 @@ mod tests {
 
         assert!(!db.is_empty(), "Database should not be empty after insert");
         assert_eq!(db.len(), 1);
-        assert!(db.conteins(&key1), "Database should contain key1");
+        assert!(db.contains(&key1), "Database should contain key1");
 
         // Verify retrieval via get() and get_ref()
         assert_eq!(db.get(&key1), Some(val1.clone()));
@@ -155,7 +211,7 @@ mod tests {
 
         // Non-existent key check
         let missing_key = make_hash(99);
-        assert!(!db.conteins(&missing_key));
+        assert!(!db.contains(&missing_key));
         assert_eq!(db.get(&missing_key), None);
         assert_eq!(db.get_ref(&missing_key), None);
 
@@ -163,7 +219,7 @@ mod tests {
         let removed = db.remove(&key1);
         assert_eq!(removed, Some(val1), "Removed value should match the original");
         assert!(db.is_empty(), "Database should be empty after removing the only entry");
-        assert!(!db.conteins(&key1));
+        assert!(!db.contains(&key1));
 
         // Removing non-existent key returns None
         assert_eq!(db.remove(&key1), None);

@@ -16,7 +16,7 @@ pub const CHUNK_MIN_SIZE: usize = 1024 * 512;
 
 pub trait OnlineSBC<
     S,
-    H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
+    H:ChunkHash + Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
     E,
     const N: usize,
 >
@@ -31,7 +31,7 @@ pub trait OnlineSBC<
 #[allow(dead_code)]
 pub struct PalantirOnline<
     S,
-    H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
+    H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
     E: PalantirEncoder,
     const N: usize,
 > {
@@ -57,7 +57,6 @@ pub struct PalantirOnline<
 
 #[allow(unused_variables)]
 impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> PalantirOnline<S, [u8; 32], E, N> {
-        /// Общая логика обработки одного чанка: L1 -> L2 -> Delta -> База
         fn process_chunk(&mut self, chunk_data: &[u8], sf_raw: [u32; 12]) {
             let mut hasher = blake3::Hasher::new();
             hasher.update(chunk_data);
@@ -65,7 +64,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> PalantirOnlin
             let hash = hash.as_bytes();
     
             match self.metadata_manager.lookup_fingerprint(hash) {
-                Some(_) => {} // L1 exact duplicate — пропускаем
+                Some(_) => {}
                 None => {
                     let super_features = if self.naive {
                         let sf = collect_raw_features(chunk_data, CHUNK_MIN_SIZE);
