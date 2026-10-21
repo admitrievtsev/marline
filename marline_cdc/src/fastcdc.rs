@@ -120,7 +120,7 @@ const LINEAR_COEFFICIENTS: [u64; 12] = [
 // The program to produce this table is named table64.rs in examples.
 //
 #[rustfmt::skip]
-const GEAR: [u64; 256] = [
+pub const GEAR: [u64; 256] = [
     0x3b5d3c7d207e37dc, 0x784d68ba91123086, 0xcd52880f882e7298, 0xeacf8e4e19fdcca7,
     0xc31f385dfbd1632b, 0x1d5f27001e25abe6, 0x83130bde3c9ad991, 0xc4b225676e9b7649,
     0xaa329b29e08eb499, 0xb67fcbd21e577d58, 0x0027baaada2acf6b, 0xe3ef2d5ac73c2226,
@@ -194,7 +194,7 @@ const GEAR: [u64; 256] = [
 // The program to produce this table is named table64ls.rs in examples.
 //
 #[rustfmt::skip]
-const GEAR_LS: [u64; 256] = [
+pub const GEAR_LS: [u64; 256] = [
     0x76ba78fa40fc6fb8, 0xf09ad1752224610c, 0x9aa5101f105ce530, 0xd59f1c9c33fb994e,
     0x863e70bbf7a2c656, 0x3abe4e003c4b57cc, 0x062617bc7935b322, 0x89644acedd36ec92,
     0x54653653c11d6932, 0x6cff97a43caefab0, 0x004f7555b4559ed6, 0xc7de5ab58e78444c,
@@ -509,7 +509,7 @@ pub struct Chunk {
 ///
 /// ```no_run
 /// use std::fs;
-/// use marline_palantir::fastcdc;
+/// use marline_cdc::fastcdc;
 /// let contents = fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = fastcdc::FastCDC::new(&contents, 8192, 16384, 65535);
 /// for (chunk, _features) in chunker {
@@ -720,7 +720,7 @@ pub struct ChunkData {
 ///
 /// ```no_run
 /// # use std::fs::File;
-/// use marline_palantir::fastcdc::StreamCDC;
+/// use marline_cdc::fastcdc::StreamCDC;
 /// let source = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = StreamCDC::new(source, 4096, 16384, 65535);
 /// for result in chunker {
@@ -864,7 +864,7 @@ impl<R: Read> StreamCDC<R> {
         if self.length == 0 {
             Err(Error::Empty)
         } else {
-            let (hash, count, _) = cut_gear(
+            let (hash, count, features) = cut_gear(
                 &self.buffer[..self.length],
                 self.min_size,
                 self.avg_size,
@@ -882,8 +882,7 @@ impl<R: Read> StreamCDC<R> {
                 let offset = self.processed;
                 self.processed += count as u64;
                 let data = self.drain_bytes(count)?;
-                let rf = [0; 12];
-                Ok((ChunkData { hash, offset, length: count, data }, rf))
+                Ok((ChunkData { hash, offset, length: count, data }, features))
             }
         }
     }

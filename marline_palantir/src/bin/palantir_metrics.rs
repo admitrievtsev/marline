@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+// use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use chunkfs::chunkers::{FastChunker, SizeParams};
-use chunkfs::hashers::Sha256Hasher;
-use chunkfs::{DataContainer, FileSystem};
+// use chunkfs::chunkers::{FastChunker, SizeParams};
+// use chunkfs::hashers::Sha256Hasher;
+// use chunkfs::{DataContainer, FileSystem};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
@@ -83,56 +83,56 @@ fn collect_files(dir: &Path, files: &mut Vec<Vec<u8>>) {
     }
 }
 
-#[allow(dead_code)]
-fn run_metrics(
-    name: &str,
-    scrubber: impl chunkfs::Scrub<
-            [u8; 32],
-            HashMap<[u8; 32], DataContainer<[u8; 32]>>,
-            [u8; 32],
-            HashMap<[u8; 32], Vec<u8>>,
-        > + 'static,
-    kernel_files: &[Vec<Vec<u8>>],
-) {
-    let database: HashMap<[u8; 32], DataContainer<[u8; 32]>> = HashMap::default();
-    let target_map = HashMap::new();
-    let hasher = Sha256Hasher::default();
+// #[allow(dead_code)]
+// fn run_metrics(
+//     name: &str,
+//     scrubber: impl chunkfs::Scrub<
+//             [u8; 32],
+//             HashMap<[u8; 32], DataContainer<[u8; 32]>>,
+//             [u8; 32],
+//             HashMap<[u8; 32], Vec<u8>>,
+//         > + 'static,
+//     kernel_files: &[Vec<Vec<u8>>],
+// ) {
+//     let database: HashMap<[u8; 32], DataContainer<[u8; 32]>> = HashMap::default();
+//     let target_map = HashMap::new();
+//     let hasher = Sha256Hasher::default();
 
-    let mut fs = FileSystem::new_with_scrubber(database, target_map, Box::new(scrubber), hasher);
+//     let mut fs = FileSystem::new_with_scrubber(database, target_map, Box::new(scrubber), hasher);
 
-    let chunk_size = SizeParams::new(8192, 32768, 65536);
-    let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
-    let start = Instant::now();
+//     let chunk_size = SizeParams::new(8192, 32768, 65536);
+//     let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
+//     let start = Instant::now();
 
-    let mut file_id = 0u64;
-    for files in kernel_files {
-        for data in files {
-            let chunker = FastChunker::new(chunk_size);
-            let mut handle = fs.create_file(format!("f{}", file_id), chunker).unwrap();
-            fs.write_to_file(&mut handle, data).unwrap();
-            fs.close_file(handle).unwrap();
-            file_id += 1;
-        }
-    }
+//     let mut file_id = 0u64;
+//     for files in kernel_files {
+//         for data in files {
+//             let chunker = FastChunker::new(chunk_size);
+//             let mut handle = fs.create_file(format!("f{}", file_id), chunker).unwrap();
+//             fs.write_to_file(&mut handle, data).unwrap();
+//             fs.close_file(handle).unwrap();
+//             file_id += 1;
+//         }
+//     }
 
-    let cdc_ratio = fs.cdc_dedup_ratio();
-    fs.scrub().unwrap();
-    let total_ratio = fs.total_dedup_ratio();
-    let elapsed = start.elapsed();
+//     let cdc_ratio = fs.cdc_dedup_ratio();
+//     fs.scrub().unwrap();
+//     let total_ratio = fs.total_dedup_ratio();
+//     let elapsed = start.elapsed();
 
-    let stored_mb = (original_total as f64 / total_ratio) / (1024.0 * 1024.0);
-    let orig_mb = original_total as f64 / (1024.0 * 1024.0);
-    let mbps = if elapsed.as_secs_f64() > 0.0 {
-        original_total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0)
-    } else {
-        0.0
-    };
+//     let stored_mb = (original_total as f64 / total_ratio) / (1024.0 * 1024.0);
+//     let orig_mb = original_total as f64 / (1024.0 * 1024.0);
+//     let mbps = if elapsed.as_secs_f64() > 0.0 {
+//         original_total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0)
+//     } else {
+//         0.0
+//     };
 
-    println!(
-        "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
-        name, cdc_ratio, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
-    );
-}
+//     println!(
+//         "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
+//         name, cdc_ratio, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
+//     );
+// }
 
 #[allow(dead_code)]
 fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {

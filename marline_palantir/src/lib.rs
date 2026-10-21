@@ -65,10 +65,9 @@ pub mod error;
 ///
 /// [`cut_gear`]: fastcdc::cut_gear
 /// [`FastCDC`]: fastcdc::FastCDC
-pub mod fastcdc;
+pub use marline_cdc::fastcdc;
 pub mod lifecycle_manager;
 pub mod metadata_manager;
-pub mod mock_rocksdb;
 pub mod palantir_online;
 pub mod palantir_scrubber;
 pub mod sf_generator;

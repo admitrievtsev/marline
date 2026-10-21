@@ -1,5 +1,5 @@
 use crate::types::BlockID;
-use chunkfs::ChunkHash;
+use marline_storage::ChunkHash;
 use std::collections::HashMap;
 
 pub struct FPTable<H: ChunkHash> {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use chunkfs::hashers::Sha256Hasher;
-use chunkfs::{Data, DataContainer, Hasher, Scrub};
+use marline_storage::{Data, DataContainer};
+use sha2::{Digest, Sha256};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
@@ -11,7 +11,9 @@ use marline_palantir::sf_generator::{PalantirHasher, SuperFeatureGenerator};
 use marline_palantir::types::{BlockID, Chunk, TierConfig};
 
 fn hash_data(data: &[u8]) -> [u8; 32] {
-    Sha256Hasher::default().hash(data)
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hasher.finalize().into()
 }
 
 #[test]

@@ -1,14 +1,12 @@
 use crate::encoder::PalantirEncoder;
 use crate::error::PalantirError;
-use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
-use crate::mock_rocksdb::{Entry, MockRocksDBMap};
-use crate::palantir_scrubber::get_entry;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
-use chunkfs::{ChunkHash, Database};
 use marline_index::heuristic_index::SearchConfig;
+use marline_storage::{ChunkHash, MetricsDatabase};
+use marline_cdc::{collect_raw_features, FastCDC, StreamCDC};
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -18,19 +16,22 @@ pub const CHUNK_MIN_SIZE: usize = 1024 * 512;
 
 pub trait OnlineSBC<
     S,
-    H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
+    H:ChunkHash + Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
     E,
     const N: usize,
 >
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError>;
 
+    fn write_stream<R: std::io::Read>(&mut self, reader: R) -> Result<(), PalantirError>;
+
+
     fn bytes_stored(&self) -> usize;
 }
-
+#[allow(dead_code)]
 pub struct PalantirOnline<
     S,
-    H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
+    H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
     E: PalantirEncoder,
     const N: usize,
 > {
@@ -50,125 +51,91 @@ pub struct PalantirOnline<
     delta_stored: u64,
     /// Tracks chunk hash → base hash for stored deltas (chain rebuild).
     delta_bases: HashMap<H, H>,
-    manifest_base: MockRocksDBMap,
-    target_map: HashMap<H, Vec<u8>>,
+    /// Database stub.
+    db: MetricsDatabase,
 }
 
 #[allow(unused_variables)]
-impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
-    for PalantirOnline<S, [u8; 32], E, N>
-{
-    fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
-        let chunker = FastCDC::new(data, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
-        // let chunker = FastCDC::new(&data, 1024 * 8, 16 * 1024, 32 * 1024);
-
-        for (chunk, sf_raw) in chunker {
-            let chunk_data = &data[chunk.offset..chunk.offset + chunk.length].to_vec();
+impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> PalantirOnline<S, [u8; 32], E, N> {
+        fn process_chunk(&mut self, chunk_data: &[u8], sf_raw: [u32; 12]) {
             let mut hasher = blake3::Hasher::new();
-            //println!("size: {}, SF{:?}", chunk_data.len(), sf_raw);
             hasher.update(chunk_data);
             let hash = hasher.finalize();
             let hash = hash.as_bytes();
-            // let super_features = self.sf_gen.generate(&Chunk::new(chunk_data.clone()));
-
+    
             match self.metadata_manager.lookup_fingerprint(hash) {
                 Some(_) => {}
                 None => {
                     let super_features = if self.naive {
-                        // Baseline: recompute features with a second scan
-                        // over the chunk data instead of reusing the
-                        // in-pass features.
                         let sf = collect_raw_features(chunk_data, CHUNK_MIN_SIZE);
                         debug_assert_eq!(sf, sf_raw, "two-pass features must equal in-pass");
                         self.sf_gen.generate_from_raw(&sf)
                     } else {
                         self.sf_gen.generate_from_raw(&sf_raw)
                     };
-
+    
                     match self.metadata_manager.lookup_super_features(&super_features) {
                         Some((base_hash, _)) => {
-                            let entry = get_entry(
-                                &mut self.manifest_base,
-                                &self.delta_bases,
-                                &base_hash.hash,
-                            );
-
-                            let data = entry.get_data().to_vec();
-
-                            match entry.get_manifest() {
-                                Some(manifest) => {
-                                    let delta = self.encoder.encode_with_manifest(
-                                        chunk_data,
-                                        entry.get_data(),
-                                        manifest,
-                                    );
-                                    let delta_compressed =
-                                        zstd::encode_all(delta.as_slice(), 0).unwrap();
-                                    let simple_compressed =
-                                        zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                                    let ratio = delta_compressed.len() as f64
-                                        / simple_compressed.len() as f64;
-                                    if ratio < self.fp_threshold {
-                                        let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
-                                        self.delta_stored += 1;
-                                    } else {
-                                        self.target_map.insert(*hash, chunk_data.clone());
-                                        let _ = &mut self
-                                            .manifest_base
-                                            .insert(*hash, Entry::from(chunk_data.clone()));
-                                    }
-                                }
-                                None => {
-                                    /*
-                                    let fp_table = E::generate_fp_table(&data);
-                                    let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
-
-                                    let delta = self
-                                        .encoder
-                                        .encode_with_manifest(chunk_data, &data, &fp_table.unwrap());
-                                        */
-
-                                    //let delta = self.encoder.encode(chunk_data, &data);
-
-                                    //let delta_compressed =
-                                    //   zstd::encode_all(delta.as_slice(), 0).unwrap();
-
-                                    // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                                    let delta_compressed = data;
-
-                                    let _ = self.target_map.insert(*hash, delta_compressed);
+                            let mut root_hash = base_hash.hash;
+                            while let Some(&parent) = self.delta_bases.get(&root_hash) {
+                                root_hash = parent;
+                            }
+    
+                            if let Some(base_data) = self.db.get(&root_hash) {
+                                let delta = self.encoder.encode(chunk_data, &base_data);
+                                let delta_compressed = zstd::encode_all(delta.as_slice(), 0).unwrap();
+                                let simple_compressed = zstd::encode_all(chunk_data, 0).unwrap();
+    
+                                let ratio = delta_compressed.len() as f64 / simple_compressed.len() as f64;
+                                if ratio < self.fp_threshold {
+                                    self.db.insert_delta(*hash, &delta_compressed);
                                     self.delta_bases.insert(*hash, base_hash.hash);
                                     self.delta_stored += 1;
+                                } else {
+                                    self.db.insert(*hash, chunk_data);
                                 }
+                            } else {
+                                self.db.insert(*hash, chunk_data);
                             }
                         }
                         None => {
-                            // let fp_table = E::generate_fp_table(&chunk.as_bytes());
-                            let fp_table = None;
-                            // let chunk_data = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                            self.target_map.insert(*hash, chunk_data.clone());
-                            let _ = &self
-                                .manifest_base
-                                .insert(*hash, Entry::new(fp_table, chunk_data.clone()));
+                            self.db.insert(*hash, chunk_data);
                         }
                     }
-
+    
                     self.metadata_manager.add_block(*hash, &super_features, BlockID::new(*hash));
                 }
             }
             self.chunks_processed += 1;
         }
-        Ok(())
     }
-    fn bytes_stored(&self) -> usize {
-        let mut size = 0usize;
-        for val in self.target_map.values() {
-            size += val.len()
+
+impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
+        for PalantirOnline<S, [u8; 32], E, N>
+    {
+        fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
+            let chunker = FastCDC::new(data, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
+            for (chunk, sf_raw) in chunker {
+                let chunk_data = &data[chunk.offset..chunk.offset + chunk.length];
+                self.process_chunk(chunk_data, sf_raw);
+            }
+            Ok(())
         }
-        size
+
+        fn write_stream<R: std::io::Read>(&mut self, reader: R) -> Result<(), PalantirError> {
+            let chunker = StreamCDC::new(reader, CHUNK_MIN_SIZE, 1024 * 1024, 2 * 1024 * 1024);
+            for result in chunker {
+                let (chunk, sf_raw) = result.map_err(|e| PalantirError::ChunkError(e.to_string()))?;
+                self.process_chunk(&chunk.data, sf_raw);
+            }
+            Ok(())
+        }
+
+        fn bytes_stored(&self) -> usize {
+            self.db.total_saved_bytes
+        }
     }
-}
+
 
 impl<
         S,
@@ -209,8 +176,7 @@ impl<
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
-            manifest_base: MockRocksDBMap::new(),
-            target_map: HashMap::new(),
+            db: MetricsDatabase::new(),
         }
     }
 
@@ -332,3 +298,94 @@ const GEAR: [u64; 256] = [
     0xfb1e6e22e08a03b3, 0xea635fdba3698dd0, 0xcf53659328503a5c, 0xcde3b31e6fd5d780,
     0x8e3e4221d3614413, 0xef14d0d86bf1a22c, 0xe1d830d3f16c5ddb, 0xaabd2b2a451504e1
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encoder::GdeltaEncoder;
+    use crate::lifecycle_manager::LifecycleManager;
+    use crate::sf_generator::PalantirHasher;
+    use std::io::Cursor;
+
+    fn create_test_online() -> PalantirOnline<PalantirHasher, [u8; 32], GdeltaEncoder, 3> {
+        let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
+        let encoder = GdeltaEncoder;
+        let tier_config = TierConfig::new([4, 3, 2]);
+        let lifecycle_configs = LifecycleManager::<3>::default_configs();
+        let search_config = SearchConfig::default();
+
+        PalantirOnline::new(sf_gen, encoder, tier_config, lifecycle_configs, search_config)
+    }
+
+    #[test]
+    fn test_palantir_online_exact_duplicate() {
+        let mut online = create_test_online();
+        // Generate 2 MB of deterministic data (sufficient for chunk cuts)
+        let data: Vec<u8> = (0..2 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+
+        // First write: baseline data
+        online.write(&data).unwrap();
+        let initial_stored = online.bytes_stored();
+        assert!(initial_stored > 0);
+        assert_eq!(online.delta_stored, 0);
+
+        // Second write: identical data (L1 exact deduplication)
+        online.write(&data).unwrap();
+        assert_eq!(
+            online.bytes_stored(),
+            initial_stored,
+            "Exact duplicates must not increase stored byte count"
+        );
+    }
+
+    #[test]
+    fn test_palantir_online_similarity_delta() {
+        let mut online = create_test_online();
+        let data1: Vec<u8> = (0..2 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+        let mut data2 = data1.clone();
+
+        // Mutate ~2% of bytes to produce highly similar chunks
+        for item in data2[1024 * 1024..1024 * 1024 + 8192].iter_mut() {
+        *item = item.wrapping_add(42);
+        }
+
+
+        // Write base data
+        online.write(&data1).unwrap();
+        let base_stored = online.bytes_stored();
+
+        // Write similar data
+        online.write(&data2).unwrap();
+
+        // Verify L2 similarity detection and delta encoding
+        assert!(
+            online.delta_stored > 0,
+            "Similar chunks should be detected and stored as deltas"
+        );
+        assert!(
+            online.bytes_stored() < base_stored * 2,
+            "With delta compression, total stored bytes must be strictly less than double the base size"
+        );
+    }
+
+    #[test]
+    fn test_palantir_online_streaming_matches_slice() {
+        let mut online_slice = create_test_online();
+        let mut online_stream = create_test_online();
+        let data: Vec<u8> = (0..2 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+
+        online_slice.write(&data).unwrap();
+        online_stream.write_stream(Cursor::new(&data)).unwrap();
+
+        assert_eq!(
+            online_slice.bytes_stored(),
+            online_stream.bytes_stored(),
+            "Stream mode must produce identical stored bytes as slice mode"
+        );
+        assert_eq!(
+            online_slice.chunks_processed,
+            online_stream.chunks_processed,
+            "Stream mode must process the same number of chunks as slice mode"
+        );
+    }
+}
