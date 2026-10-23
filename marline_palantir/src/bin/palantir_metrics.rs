@@ -1,63 +1,190 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::rc::Rc;
 use std::time::Instant;
 
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
-use chunkfs::{DataContainer, FileSystem};
+use chunkfs::{Data, DataContainer, FileSystem, Scrub, ScrubMeasurements};
+use clap::{Parser, ValueEnum};
+use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
-use marline_palantir::lifecycle_manager::LifecycleManager;
+use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
 use marline_palantir::mock_rocksdb::MockRocksDBMap;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::TierConfig;
-use marline_index::heuristic_index::SearchConfig;
+use marline_palantir::utils::lcm_vec;
+use serde::Serialize;
 
-fn fmt_sc(sc: &SearchConfig) -> String {
-    format!(
-        "mj={:.2} df={} rf={} fp={}",
-        sc.min_jaccard.unwrap_or(-1.0),
-        sc.max_df.map_or(-1, |v| v as i32),
-        if sc.rare_first { 1 } else { 0 },
-        sc.fp_metric_threshold.map_or(-1, |v| v as i32),
-    )
+const MIB: f64 = 1024.0 * 1024.0;
+
+const ALL_VERSIONS: [&str; 15] = [
+    "4.19", "5.4", "5.10", "5.15", "6.1", "6.2", "6.3", "6.4", "6.5", "6.6", "6.6.7", "6.6.14",
+    "6.6.21", "6.6.28", "6.6-dup",
+];
+
+const DEFAULT_WINDOWS: [(&str, &str); 14] = [
+    ("4.19", "5.4"),
+    ("5.4", "5.10"),
+    ("5.10", "5.15"),
+    ("5.15", "6.1"),
+    ("6.1", "6.2"),
+    ("6.2", "6.3"),
+    ("6.3", "6.4"),
+    ("6.4", "6.5"),
+    ("6.5", "6.6"),
+    ("6.6", "6.6.7"),
+    ("6.6.7", "6.6.14"),
+    ("6.6.14", "6.6.21"),
+    ("6.6.21", "6.6.28"),
+    ("6.6.28", "6.6-dup"),
+];
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum Regime {
+    Regime1,
+    Regime2,
 }
 
-struct Config {
-    name: &'static str,
-    tier_list: Vec<u32>,
-    features_num_override: Option<usize>,
+#[derive(Parser, Debug)]
+#[command(
+    name = "palantir_metrics",
+    about = "Palantir kernel-dataset benchmark runner (regime1: full-tree windows, regime2: uniform slices)"
+)]
+struct Cli {
+    #[arg(long, value_enum, default_value_t = Regime::Regime2)]
+    regime: Regime,
+
+    #[arg(long, default_value = "/home/maxllon/pornfolder/linuxes")]
+    root: PathBuf,
+
+    #[arg(long, value_delimiter = ',')]
+    versions: Vec<String>,
+
+    #[arg(long, value_delimiter = ',')]
+    windows: Vec<String>,
+
+    #[arg(long, value_delimiter = ',')]
+    tiers: Vec<String>,
+
+    #[arg(long, default_value_t = 7)]
+    sampling_rate: u64,
+
+    #[arg(long, value_delimiter = ',')]
+    min_jaccard: Vec<f64>,
+
+    #[arg(long, value_delimiter = ',')]
+    max_df: Vec<usize>,
+
+    #[arg(long, value_delimiter = ',')]
+    rare_first: Vec<bool>,
+
+    #[arg(long, value_delimiter = ',')]
+    fp_metric_threshold: Vec<u8>,
+
+    #[arg(long, default_value_t = 8192)]
+    cdc_min: usize,
+
+    #[arg(long, default_value_t = 32768)]
+    cdc_avg: usize,
+
+    #[arg(long, default_value_t = 65536)]
+    cdc_max: usize,
+
+    #[arg(long, default_value = "0", value_parser = parse_seed)]
+    seed: u64,
+
+    #[arg(long)]
+    no_extract: bool,
+
+    #[arg(long)]
+    out: PathBuf,
 }
 
-fn configs() -> Vec<Config> {
+fn parse_seed(raw: &str) -> Result<u64, String> {
+    let s = raw.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).map_err(|e| e.to_string())
+    } else {
+        s.parse::<u64>().map_err(|e| e.to_string())
+    }
+}
+
+#[derive(Clone)]
+struct TierSpec {
+    name: String,
+    tiers: Vec<u32>,
+    features_num: Option<usize>,
+}
+
+fn builtin_tiers() -> Vec<TierSpec> {
     vec![
-        Config { name: "ODESS", tier_list: vec![4], features_num_override: Some(12) },
-        Config { name: "N2_G3-2", tier_list: vec![3, 2], features_num_override: None },
-        Config { name: "N3_G4-3-2", tier_list: vec![4, 3, 2], features_num_override: None },
-        Config { name: "N3_G8-4-2", tier_list: vec![8, 4, 2], features_num_override: None },
-        Config { name: "N4_G6-4-3-2", tier_list: vec![6, 4, 3, 2], features_num_override: None },
-        Config {
-            name: "N5_G12-6-4-3-2",
-            tier_list: vec![12, 6, 4, 3, 2],
-            features_num_override: None,
-        },
+        TierSpec { name: "ODESS".into(), tiers: vec![4], features_num: Some(12) },
+        TierSpec { name: "N2_G3-2".into(), tiers: vec![3, 2], features_num: None },
+        TierSpec { name: "N3_G4-3-2".into(), tiers: vec![4, 3, 2], features_num: None },
+        TierSpec { name: "N3_G8-4-2".into(), tiers: vec![8, 4, 2], features_num: None },
+        TierSpec { name: "N4_G6-4-3-2".into(), tiers: vec![6, 4, 3, 2], features_num: None },
+        TierSpec { name: "N5_G12-6-4-3-2".into(), tiers: vec![12, 6, 4, 3, 2], features_num: None },
+        TierSpec { name: "N1_G12".into(), tiers: vec![12], features_num: Some(12) },
+        TierSpec { name: "N3_G12-4-3-2".into(), tiers: vec![12, 4, 3, 2], features_num: None },
+        TierSpec { name: "N3_G6-4-2".into(), tiers: vec![6, 4, 2], features_num: None },
+        TierSpec { name: "N2_G6-4".into(), tiers: vec![6, 4], features_num: None },
+        TierSpec { name: "N3_G8-6-2".into(), tiers: vec![8, 6, 2], features_num: None },
+        TierSpec { name: "N4_G12-8-4-2".into(), tiers: vec![12, 8, 4, 2], features_num: None },
+        TierSpec { name: "N3_G4-3-2-fn24".into(), tiers: vec![4, 3, 2], features_num: Some(24) },
+        TierSpec { name: "N4_G4-3-2-1".into(), tiers: vec![4, 3, 2, 1], features_num: None },
     ]
 }
 
-fn search_config_grid() -> Vec<SearchConfig> {
-    // your heuristics
-    let min_jaccard = [];
-    let max_df = [];
-    let rare_first = [];
-    let fp_threshold = [];
+fn resolve_tiers(selected: &[String]) -> Result<Vec<TierSpec>, Box<dyn Error>> {
+    let all = builtin_tiers();
+    if selected.is_empty() {
+        return Ok(all);
+    }
+    let mut out = Vec::new();
+    for want in selected {
+        let spec = all
+            .iter()
+            .find(|t| t.name == *want)
+            .ok_or_else(|| format!("unknown tier config `{want}`"))?
+            .clone();
+        out.push(spec);
+    }
+    Ok(out)
+}
 
-    let mut configs = vec![SearchConfig::default()];
-    for &mj in &min_jaccard {
-        for &md in &max_df {
-            for &rf in &rare_first {
-                for &fp in &fp_threshold {
+fn build_search_configs(cli: &Cli) -> Vec<SearchConfig> {
+    let mjs: Vec<Option<f64>> = if cli.min_jaccard.is_empty() {
+        vec![None]
+    } else {
+        cli.min_jaccard.iter().map(|v| Some(*v)).collect()
+    };
+    let mds: Vec<Option<usize>> = if cli.max_df.is_empty() {
+        vec![None]
+    } else {
+        cli.max_df.iter().map(|v| Some(*v)).collect()
+    };
+    let rfs: Vec<bool> =
+        if cli.rare_first.is_empty() { vec![false] } else { cli.rare_first.clone() };
+    let fps: Vec<Option<u8>> = if cli.fp_metric_threshold.is_empty() {
+        vec![None]
+    } else {
+        cli.fp_metric_threshold.iter().map(|v| Some(*v)).collect()
+    };
+
+    let mut configs = Vec::new();
+    for &mj in &mjs {
+        for &md in &mds {
+            for &rf in &rfs {
+                for &fp in &fps {
                     configs.push(SearchConfig {
-                        min_jaccard: Some(mj),
+                        min_jaccard: mj,
                         max_df: md,
                         rare_first: rf,
                         fp_metric_threshold: fp,
@@ -69,174 +196,425 @@ fn search_config_grid() -> Vec<SearchConfig> {
     configs
 }
 
-fn collect_files(dir: &Path, files: &mut Vec<Vec<u8>>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                if let Ok(content) = std::fs::read(&p) {
-                    files.push(content);
+enum CaseKind {
+    Window { a: String, b: String },
+    Slices { versions: Vec<String> },
+}
+
+struct Case {
+    label: String,
+    kind: CaseKind,
+}
+
+fn resolve_cases(cli: &Cli) -> Result<Vec<Case>, Box<dyn Error>> {
+    match cli.regime {
+        Regime::Regime2 => {
+            let versions: Vec<String> = if cli.versions.is_empty() {
+                ALL_VERSIONS.iter().map(|v| (*v).to_string()).collect()
+            } else {
+                cli.versions.clone()
+            };
+            let label = if versions.len() == ALL_VERSIONS.len()
+                && versions.iter().zip(ALL_VERSIONS.iter()).all(|(a, b)| a == b)
+            {
+                "all-slices".to_string()
+            } else {
+                versions.join("|")
+            };
+            Ok(vec![Case { label, kind: CaseKind::Slices { versions } }])
+        }
+        Regime::Regime1 => {
+            let windows: Vec<(String, String)> = if !cli.windows.is_empty() {
+                let mut parsed = Vec::new();
+                for w in &cli.windows {
+                    let (a, b) = w
+                        .split_once(':')
+                        .ok_or_else(|| format!("window `{w}` must be of form <a>:<b>"))?;
+                    parsed.push((a.to_string(), b.to_string()));
                 }
-            } else if p.is_dir() {
-                collect_files(&p, files);
-            }
+                parsed
+            } else if !cli.versions.is_empty() {
+                cli.versions.windows(2).map(|pair| (pair[0].clone(), pair[1].clone())).collect()
+            } else {
+                DEFAULT_WINDOWS.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect()
+            };
+            Ok(windows
+                .into_iter()
+                .map(|(a, b)| Case { label: format!("{a}|{b}"), kind: CaseKind::Window { a, b } })
+                .collect())
         }
     }
 }
 
-fn run_metrics(
-    name: &str,
-    scrubber: impl chunkfs::Scrub<
-            [u8; 32],
-            HashMap<[u8; 32], DataContainer<[u8; 32]>>,
-            [u8; 32],
-            MockRocksDBMap,
-        > + 'static,
-    kernel_files: &[Vec<Vec<u8>>],
-) {
-    let database: HashMap<[u8; 32], DataContainer<[u8; 32]>> = HashMap::default();
-    let target_map = MockRocksDBMap::new();
-    let hasher = Sha256Hasher::default();
+fn materialize(case: &Case, cli: &Cli) -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
+    match &case.kind {
+        CaseKind::Window { a, b } => {
+            if !cli.no_extract {
+                let script = cli.root.join("extract_to_work.sh");
+                eprintln!("  extract {a} {b} ...");
+                let status = Command::new("bash").arg(&script).arg(a).arg(b).status()?;
+                if !status.success() {
+                    return Err(format!("extract_to_work.sh failed for window {a}|{b}").into());
+                }
+            }
+            let dirs = vec![
+                (a.clone(), cli.root.join("work").join(format!("linux-{a}"))),
+                (b.clone(), cli.root.join("work").join(format!("linux-{b}"))),
+            ];
+            Ok(dirs)
+        }
+        CaseKind::Slices { versions } => Ok(versions
+            .iter()
+            .map(|v| (v.clone(), cli.root.join("slices").join(format!("linux-{v}"))))
+            .collect()),
+    }
+}
 
-    let mut fs = FileSystem::new_with_scrubber(database, target_map, Box::new(scrubber), hasher);
+type Db = HashMap<[u8; 32], DataContainer<[u8; 32]>>;
+type Palantir<const N: usize> = PalantirScrubber<PalantirHasher, [u8; 32], GdeltaEncoder, N>;
 
-    let chunk_size = SizeParams::new(8192, 32768, 65536);
-    let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
-    let start = Instant::now();
+struct SharedScrubber<const N: usize> {
+    inner: Rc<RefCell<Palantir<N>>>,
+}
 
-    let mut file_id = 0u64;
-    for files in kernel_files {
-        for data in files {
-            let chunker = FastChunker::new(chunk_size);
-            let mut handle = fs.create_file(format!("f{}", file_id), chunker).unwrap();
-            fs.write_to_file(&mut handle, data).unwrap();
-            fs.close_file(handle).unwrap();
-            file_id += 1;
+impl<const N: usize> Scrub<[u8; 32], Db, [u8; 32], MockRocksDBMap> for SharedScrubber<N> {
+    fn scrub<'a>(
+        &mut self,
+        database: &mut Db,
+        target_map: &mut MockRocksDBMap,
+    ) -> io::Result<ScrubMeasurements>
+    where
+        [u8; 32]: 'a,
+    {
+        self.inner.borrow_mut().scrub(database, target_map)
+    }
+}
+
+struct RunParams {
+    sampling_rate: u64,
+    cdc_min: usize,
+    cdc_avg: usize,
+    cdc_max: usize,
+}
+
+struct RunOutcome {
+    cdc_ratio: f64,
+    total_dedup: f64,
+    stored_mb: f64,
+    orig_mb: f64,
+    elapsed_s: f64,
+    mbps: f64,
+    delta_stored: u64,
+    fp_table_size: usize,
+    sf_table_size: usize,
+}
+
+fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) -> io::Result<()> {
+    let mut visited = HashSet::new();
+    walk_inner(dir, out, &mut visited)
+}
+
+fn walk_inner(
+    dir: &Path,
+    out: &mut Vec<PathBuf>,
+    visited: &mut HashSet<PathBuf>,
+) -> io::Result<()> {
+    let canon = fs::canonicalize(dir)?;
+    if !visited.insert(canon) {
+        return Ok(());
+    }
+    let mut entries: Vec<_> = fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        let meta = fs::metadata(&path)?;
+        if meta.is_dir() {
+            walk_inner(&path, out, visited)?;
+        } else if meta.is_file() {
+            out.push(path);
         }
     }
+    Ok(())
+}
 
-    let cdc_ratio = fs.cdc_dedup_ratio();
-    fs.scrub().unwrap();
-    let total_ratio = fs.total_dedup_ratio();
+fn run_timeline<const N: usize>(
+    tier: &TierSpec,
+    lifecycle: [LifecycleTierConfig; N],
+    params: &RunParams,
+    sc: &SearchConfig,
+    version_dirs: &[(String, PathBuf)],
+) -> io::Result<RunOutcome> {
+    let hasher = match tier.features_num {
+        Some(fn_val) => {
+            PalantirHasher::with_features_num(params.sampling_rate, tier.tiers.clone(), fn_val)
+        }
+        None => PalantirHasher::new(params.sampling_rate, tier.tiers.clone()),
+    };
+    let arr: [u32; N] = tier.tiers.as_slice().try_into().expect("tier width mismatch");
+    let tier_config = match tier.features_num {
+        Some(fn_val) => TierConfig::with_features_num(arr, fn_val),
+        None => TierConfig::new(arr),
+    };
+    let scrubber = PalantirScrubber::new(hasher, GdeltaEncoder, tier_config, lifecycle, sc.clone());
+    let shared = Rc::new(RefCell::new(scrubber));
+
+    let database: Db = HashMap::new();
+    let target_map = MockRocksDBMap::new();
+    let mut fs = FileSystem::new_with_scrubber(
+        database,
+        target_map,
+        Box::new(SharedScrubber { inner: Rc::clone(&shared) }),
+        Sha256Hasher::default(),
+    );
+
+    let sizes = SizeParams::new(params.cdc_min, params.cdc_avg, params.cdc_max);
+    let start = Instant::now();
+    let mut orig_bytes: u64 = 0;
+    let mut unique_cdc: HashMap<[u8; 32], usize> = HashMap::new();
+
+    for (version, dir) in version_dirs {
+        let mut files = Vec::new();
+        walk_files(dir, &mut files)?;
+        files.sort();
+
+        for path in &files {
+            orig_bytes += fs::metadata(path)?.len();
+            let name = format!("{version}|{}", path.display());
+            let mut handle = fs.create_file(name, FastChunker::new(sizes))?;
+            let mut reader = io::BufReader::new(fs::File::open(path)?);
+            fs.write_from_stream(&mut handle, &mut reader)?;
+            fs.close_file(handle)?;
+        }
+
+        for (hash, container) in fs.storage_iterator() {
+            if let Data::Chunk(chunk) = container.extract() {
+                unique_cdc.entry(*hash).or_insert(chunk.len());
+            }
+        }
+
+        fs.scrub()?;
+        shared
+            .borrow()
+            .update()
+            .map_err(|e| io::Error::other(format!("finish_version failed: {e}")))?;
+    }
+
     let elapsed = start.elapsed();
+    let total_dedup = fs.total_dedup_ratio();
+    let unique_cdc_bytes: usize = unique_cdc.values().sum();
+    let cdc_ratio =
+        if unique_cdc_bytes > 0 { orig_bytes as f64 / unique_cdc_bytes as f64 } else { 0.0 };
+    let orig_mb = orig_bytes as f64 / MIB;
+    let stored_mb = if total_dedup > 0.0 { orig_mb / total_dedup } else { 0.0 };
+    let elapsed_s = elapsed.as_secs_f64();
+    let mbps = if elapsed_s > 0.0 { orig_mb / elapsed_s } else { 0.0 };
 
-    let stored_mb = (original_total as f64 / total_ratio) / (1024.0 * 1024.0);
-    let orig_mb = original_total as f64 / (1024.0 * 1024.0);
-    let mbps = if elapsed.as_secs_f64() > 0.0 {
-        original_total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0)
-    } else {
-        0.0
+    let (delta_stored, fp_table_size, sf_table_size) = {
+        let guard = shared.borrow();
+        (guard.delta_stored(), guard.fp_table_size(), guard.sf_table_size())
     };
 
-    println!(
-        "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
-        name, cdc_ratio, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
-    );
+    Ok(RunOutcome {
+        cdc_ratio,
+        total_dedup,
+        stored_mb,
+        orig_mb,
+        elapsed_s,
+        mbps,
+        delta_stored,
+        fp_table_size,
+        sf_table_size,
+    })
 }
 
-fn main() {
-    // example data
-    let kernel_dirs = [
-        "your/path/to/data",
-        "your/path/to/data2",
-        "your/path/to/data3",
-    ];
-
-    let mut kernel_files: Vec<Vec<Vec<u8>>> = Vec::new();
-    for dir in &kernel_dirs {
-        let mut files = Vec::new();
-        collect_files(Path::new(dir), &mut files);
-        eprintln!(
-            "  {}: {} files, {:.2} MB",
-            dir,
-            files.len(),
-            files.iter().map(|d| d.len()).sum::<usize>() as f64 / (1024.0 * 1024.0)
-        );
-        kernel_files.push(files);
+fn run_for_tier(
+    tier: &TierSpec,
+    params: &RunParams,
+    sc: &SearchConfig,
+    version_dirs: &[(String, PathBuf)],
+) -> io::Result<RunOutcome> {
+    match tier.tiers.len() {
+        1 => run_timeline::<1>(
+            tier,
+            LifecycleManager::<1>::default_configs(),
+            params,
+            sc,
+            version_dirs,
+        ),
+        2 => run_timeline::<2>(
+            tier,
+            LifecycleManager::<2>::default_configs(),
+            params,
+            sc,
+            version_dirs,
+        ),
+        3 => run_timeline::<3>(
+            tier,
+            LifecycleManager::<3>::default_configs(),
+            params,
+            sc,
+            version_dirs,
+        ),
+        4 => run_timeline::<4>(
+            tier,
+            LifecycleManager::<4>::default_configs(),
+            params,
+            sc,
+            version_dirs,
+        ),
+        5 => run_timeline::<5>(
+            tier,
+            LifecycleManager::<5>::default_configs(),
+            params,
+            sc,
+            version_dirs,
+        ),
+        n => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unsupported tier width {n} (supported 1..=5)"),
+        )),
     }
+}
 
-    println!(
-        "{:<20} {:<30} {:<12} {:<21} {:<21} {:<21} {:<12}",
-        "tier", "search_cfg", "cdc_ratio", "total_dedup", "stored_mb", "orig_mb", "mbps"
+#[derive(Serialize)]
+struct Row {
+    regime: String,
+    case: String,
+    versions: String,
+    n_versions: usize,
+    synthetic_slice: bool,
+    tier: String,
+    tier_list: String,
+    features_num: usize,
+    tier_n: usize,
+    sampling_rate: u64,
+    min_jaccard: Option<f64>,
+    max_df: Option<usize>,
+    rare_first: bool,
+    fp_metric_threshold: Option<u8>,
+    cdc_min: usize,
+    cdc_avg: usize,
+    cdc_max: usize,
+    seed: u64,
+    cdc_ratio: f64,
+    total_dedup: f64,
+    delta_gain: f64,
+    stored_mb: f64,
+    orig_mb: f64,
+    elapsed_s: f64,
+    mbps: f64,
+    delta_stored: u64,
+    fp_table_size: usize,
+    sf_table_size: usize,
+}
+
+fn features_num_of(tier: &TierSpec) -> usize {
+    match tier.features_num {
+        Some(fn_val) => fn_val,
+        None => lcm_vec(&tier.tiers).expect("tier_list LCM overflow") as usize,
+    }
+}
+
+fn build_row(
+    cli: &Cli,
+    case: &Case,
+    tier: &TierSpec,
+    sc: &SearchConfig,
+    outcome: &RunOutcome,
+) -> Row {
+    let versions: Vec<String> = match &case.kind {
+        CaseKind::Window { a, b } => vec![a.clone(), b.clone()],
+        CaseKind::Slices { versions } => versions.clone(),
+    };
+    let regime = match cli.regime {
+        Regime::Regime1 => "regime1",
+        Regime::Regime2 => "regime2",
+    };
+    Row {
+        regime: regime.to_string(),
+        case: case.label.clone(),
+        versions: versions.join("|"),
+        n_versions: versions.len(),
+        synthetic_slice: matches!(cli.regime, Regime::Regime2),
+        tier: tier.name.clone(),
+        tier_list: tier.tiers.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("-"),
+        features_num: features_num_of(tier),
+        tier_n: tier.tiers.len(),
+        sampling_rate: cli.sampling_rate,
+        min_jaccard: sc.min_jaccard,
+        max_df: sc.max_df,
+        rare_first: sc.rare_first,
+        fp_metric_threshold: sc.fp_metric_threshold,
+        cdc_min: cli.cdc_min,
+        cdc_avg: cli.cdc_avg,
+        cdc_max: cli.cdc_max,
+        seed: cli.seed,
+        cdc_ratio: outcome.cdc_ratio,
+        total_dedup: outcome.total_dedup,
+        delta_gain: outcome.total_dedup - outcome.cdc_ratio,
+        stored_mb: outcome.stored_mb,
+        orig_mb: outcome.orig_mb,
+        elapsed_s: outcome.elapsed_s,
+        mbps: outcome.mbps,
+        delta_stored: outcome.delta_stored,
+        fp_table_size: outcome.fp_table_size,
+        sf_table_size: outcome.sf_table_size,
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+    let tiers = resolve_tiers(&cli.tiers)?;
+    let search_configs = build_search_configs(&cli);
+    let cases = resolve_cases(&cli)?;
+
+    if let Some(parent) = cli.out.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    let mut writer = csv::Writer::from_path(&cli.out)?;
+
+    let params = RunParams {
+        sampling_rate: cli.sampling_rate,
+        cdc_min: cli.cdc_min,
+        cdc_avg: cli.cdc_avg,
+        cdc_max: cli.cdc_max,
+    };
+
+    eprintln!(
+        "regime={:?} cases={} tiers={} search_configs={} out={}",
+        cli.regime,
+        cases.len(),
+        tiers.len(),
+        search_configs.len(),
+        cli.out.display()
     );
 
-    for cfg in configs() {
-        for sc in search_config_grid() {
-            let sf_gen = if let Some(fn_val) = cfg.features_num_override {
-                PalantirHasher::with_features_num(7, cfg.tier_list.clone(), fn_val)
-            } else {
-                PalantirHasher::new(7, cfg.tier_list.clone())
-            };
-
-            let name = format!("{} | {}", cfg.name, fmt_sc(&sc));
-
-            match cfg.tier_list.len() {
-                1 => {
-                    let arr: [u32; 1] = cfg.tier_list.as_slice().try_into().unwrap();
-                    let tier_config = if let Some(fn_val) = cfg.features_num_override {
-                        TierConfig::with_features_num(arr, fn_val)
-                    } else {
-                        TierConfig::new(arr)
-                    };
-                    let scrubber = PalantirScrubber::new(
-                        sf_gen,
-                        GdeltaEncoder,
-                        tier_config,
-                        LifecycleManager::<1>::default_configs(),
-                        sc,
-                    );
-                    run_metrics(&name, scrubber, &kernel_files);
-                }
-                2 => {
-                    let arr: [u32; 2] = cfg.tier_list.as_slice().try_into().unwrap();
-                    let tier_config = TierConfig::new(arr);
-                    let scrubber = PalantirScrubber::new(
-                        sf_gen,
-                        GdeltaEncoder,
-                        tier_config,
-                        LifecycleManager::<2>::default_configs(),
-                        sc,
-                    );
-                    run_metrics(&name, scrubber, &kernel_files);
-                }
-                3 => {
-                    let arr: [u32; 3] = cfg.tier_list.as_slice().try_into().unwrap();
-                    let tier_config = TierConfig::new(arr);
-                    let scrubber = PalantirScrubber::new(
-                        sf_gen,
-                        GdeltaEncoder,
-                        tier_config,
-                        LifecycleManager::<3>::default_configs(),
-                        sc,
-                    );
-                    run_metrics(&name, scrubber, &kernel_files);
-                }
-                4 => {
-                    let arr: [u32; 4] = cfg.tier_list.as_slice().try_into().unwrap();
-                    let tier_config = TierConfig::new(arr);
-                    let scrubber = PalantirScrubber::new(
-                        sf_gen,
-                        GdeltaEncoder,
-                        tier_config,
-                        LifecycleManager::<4>::default_configs(),
-                        sc,
-                    );
-                    run_metrics(&name, scrubber, &kernel_files);
-                }
-                5 => {
-                    let arr: [u32; 5] = cfg.tier_list.as_slice().try_into().unwrap();
-                    let tier_config = TierConfig::new(arr);
-                    let scrubber = PalantirScrubber::new(
-                        sf_gen,
-                        GdeltaEncoder,
-                        tier_config,
-                        LifecycleManager::<5>::default_configs(),
-                        sc,
-                    );
-                    run_metrics(&name, scrubber, &kernel_files);
-                }
-                _ => unreachable!(),
+    for case in &cases {
+        let version_dirs = materialize(case, &cli)?;
+        eprintln!("== case {} ==", case.label);
+        for tier in &tiers {
+            for sc in &search_configs {
+                let outcome = run_for_tier(tier, &params, sc, &version_dirs)?;
+                let row = build_row(&cli, case, tier, sc, &outcome);
+                eprintln!(
+                    "  {:<16} cdc={:.4} total={:.4} gain={:+.4} stored_mb={:.3} elapsed_s={:.2} mbps={:.2} deltas={}",
+                    tier.name,
+                    row.cdc_ratio,
+                    row.total_dedup,
+                    row.delta_gain,
+                    row.stored_mb,
+                    row.elapsed_s,
+                    row.mbps,
+                    row.delta_stored,
+                );
+                writer.serialize(&row)?;
+                writer.flush()?;
             }
         }
     }
+
+    eprintln!("wrote {}", cli.out.display());
+    Ok(())
 }

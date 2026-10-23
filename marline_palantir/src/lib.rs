@@ -59,6 +59,8 @@
 //! [`MetadataManager`]: metadata_manager::MetadataManager
 //! [`PalantirScrubber`]: palantir_scrubber::PalantirScrubber
 //!
+#![allow(clippy::clone_on_copy, clippy::should_implement_trait, clippy::new_without_default)]
+
 pub mod encoder;
 pub mod error;
 pub mod lifecycle_manager;
