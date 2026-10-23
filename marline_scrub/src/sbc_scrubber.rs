@@ -7,6 +7,7 @@ use marline_sketcher::SBCHasher;
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
+use marline_metrics::{MetricsRecorder, Stage};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 use std::collections::HashMap;
@@ -257,6 +258,9 @@ where
 
     /// Encoder used to encode clusters into delta or simple chunks.
     encoder: E,
+
+    /// Optional runtime latency recorder.
+    metrics: Option<MetricsRecorder>,
 }
 
 impl<Hash, H, C, E> SBCScrubber<Hash, H, C, E>
@@ -278,7 +282,13 @@ where
     ///
     /// A new `SBCScrubber` ready to process chunks.
     pub fn new(hasher: H, clusterer: C, encoder: E) -> Self {
-        SBCScrubber { hasher, clusterer, encoder }
+        SBCScrubber { hasher, clusterer, encoder, metrics: None }
+    }
+
+    /// Attach an opt-in runtime metrics recorder to this scrubber.
+    pub fn with_metrics(mut self, recorder: MetricsRecorder) -> Self {
+        self.metrics = Some(recorder);
+        self
     }
 }
 
@@ -323,8 +333,15 @@ where
         // Mutex-protected vector to accumulate (hash, data_container) pairs after hashing
         let sbc_hash_chunk: Mutex<Vec<_>> = Mutex::default();
 
+        let total_start = Instant::now();
+        let total_enabled =
+            self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcScrubTotal));
+        let mut metrics_batch = self.metrics.as_ref().map(MetricsRecorder::batch);
+
         // 1. Hashing: compute similarity hashes in parallel
-        let time_start = Instant::now();
+        let hashing_enabled =
+            self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcHashing));
+        let hashing_start = hashing_enabled.then(Instant::now);
         pool.install(|| {
             mut_refs_database.par_iter_mut().for_each(|data_container| {
                 match data_container.extract() {
@@ -340,24 +357,45 @@ where
                 }
             });
         });
-        let time_hashing = time_start.elapsed().as_secs_f64();
-        print!("HashTime: {time_hashing:.4};");
+        if hashing_enabled {
+            if let Some(batch) = metrics_batch.as_mut() {
+                batch.record_unconditionally(Stage::SbcHashing, hashing_start.unwrap().elapsed());
+            }
+        }
 
         // 2. Clustering: group chunks by similarity
-        let time_clusterize_start = time_start.elapsed();
+        let cluster_enabled =
+            self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcClustering));
+        let cluster_start = cluster_enabled.then(Instant::now);
         let (mut clusters, clusterization_report) =
             self.clusterer.clusterize(sbc_hash_chunk.into_inner().unwrap());
-        let time_clusterize =
-            time_start.elapsed().as_secs_f64() - time_clusterize_start.as_secs_f64();
-        print!("ClusterTime: {time_clusterize:.4};");
+        if cluster_enabled {
+            if let Some(batch) = metrics_batch.as_mut() {
+                batch
+                    .record_unconditionally(Stage::SbcClustering, cluster_start.unwrap().elapsed());
+            }
+        }
 
         // 3. Encoding: encode clusters and store in target map
-        let time_encode_start = time_start.elapsed();
+        let encode_enabled =
+            self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcEncoding));
+        let encode_start = encode_enabled.then(Instant::now);
         let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
-        let time_encode = time_start.elapsed().as_secs_f64() - time_encode_start.as_secs_f64();
-        print!("EncodeTime: {time_encode:.4};");
+        if encode_enabled {
+            if let Some(batch) = metrics_batch.as_mut() {
+                batch.record_unconditionally(Stage::SbcEncoding, encode_start.unwrap().elapsed());
+            }
+        }
 
-        let running_time = time_start.elapsed();
+        let running_time = total_start.elapsed();
+        if total_enabled {
+            if let Some(batch) = metrics_batch.as_mut() {
+                batch.record_unconditionally(Stage::SbcScrubTotal, running_time);
+            }
+        }
+
+        // Merge per-scrub measurements before returning the result.
+        drop(metrics_batch);
 
         Ok(ScrubMeasurements {
             processed_data,

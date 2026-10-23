@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 marline_scrub = { path = "../marline_scrub" }
+marline_metrics = { path = "../marline_metrics" }
 
 marline_sketcher = { path = "../marline_sketcher" }
 chunkfs = { git = "https://github.com/Piletskii-Oleg/chunkfs.git", features = ["chunkers", "hashers"]}
