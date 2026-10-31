@@ -6,7 +6,7 @@ use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::Data;
 use chunkfs::Database;
-use marline_sketcher::speedsketch;
+use marline_sketcher::speedsketch::{self, SpeedSketchConfig};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,7 @@ use zstd::stream;
 
 pub struct GdeltaEncoder {
     zstd_flag: bool,
+    sketch_config: SpeedSketchConfig,
 }
 
 /// Everything a delta chunk is encoded against, built once per cluster: the bytes of the base
@@ -33,7 +34,17 @@ impl Default for GdeltaEncoder {
 
 impl GdeltaEncoder {
     pub fn new(zstd_flag: bool) -> Self {
-        GdeltaEncoder { zstd_flag }
+        Self::with_sketch_config(zstd_flag, SpeedSketchConfig::default())
+    }
+
+    /// Creates an encoder that uses the same sketch masks as the hasher that produced the
+    /// chunk hashes.
+    pub fn with_sketch_config(zstd_flag: bool, sketch_config: SpeedSketchConfig) -> Self {
+        GdeltaEncoder { zstd_flag, sketch_config }
+    }
+
+    pub fn sketch_config(&self) -> &SpeedSketchConfig {
+        &self.sketch_config
     }
 
     /// Encodes `chunk_data` against `base` as a list of INSERT and COPY instructions.
@@ -127,9 +138,26 @@ impl GdeltaEncoder {
         hash: Hash,
         base: &BaseChunk<Hash>,
     ) -> (usize, usize, SBCKey<Hash>) {
+        if let Some(id) = hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
+        if let Some(id) = base.sbc_hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "base chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
+
         // Sketch of the input chunk. Reused from the hashing stage when the hasher already
         // produced one, computed here otherwise.
-        let sketch_input = hash.sketch().unwrap_or_else(|| speedsketch::sketch(chunk_data));
+        let sketch_input = hash
+            .sketch()
+            .unwrap_or_else(|| speedsketch::sketch_with(chunk_data, self.sketch_config.masks()));
         let mut delta_code = GdeltaEncoder::delta_code(chunk_data, base, sketch_input);
 
         let mut target_map_lock = target_map.lock().unwrap();
@@ -162,6 +190,13 @@ impl Encoder for GdeltaEncoder {
         let mut data_left = parent_chunk.data_left;
         let parent_data = parent_chunk.parent_data;
         let parent_sbc_hash = parent_chunk.parent_hash;
+        if let Some(id) = parent_sbc_hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "parent chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
         let word_size: usize = speedsketch::WORD_SIZE;
         let move_bts: usize = 64 / word_size;
         let mut word_hash_offsets: HashMap<u64, usize> = HashMap::new();
@@ -182,7 +217,7 @@ impl Encoder for GdeltaEncoder {
             fp = (fp << move_bts).wrapping_add(gear(parent_data[i + word_size - 1]));
             let word_hash: u64 = fp >> (64 - mask_bts);
             word_hash_offsets.insert(word_hash, i);
-            if speedsketch::is_proxy(fp) {
+            if speedsketch::is_proxy_with(fp, self.sketch_config.masks()) {
                 base_sketch |= 1u64 << speedsketch::class_of(fp);
             }
         }
