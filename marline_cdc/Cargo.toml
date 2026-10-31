@@ -3,5 +3,8 @@ name = "marline_cdc"
 version.workspace = true
 edition.workspace = true
 
+[dependencies]
+marline_utils = {path = "../marline_utils"}
+
 [dev-dependencies]
 blake3 = "1.8.5"
