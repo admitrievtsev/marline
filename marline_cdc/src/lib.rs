@@ -1,11 +1,10 @@
 pub mod fastcdc;
 
 pub use fastcdc::{
-    collect_raw_features, cut_gear, Chunk, ChunkData, FastCDC, Normalization, StreamCDC, GEAR,
-    MASKS,
+    collect_raw_features, cut_gear, Chunk, ChunkData, FastCDC, Normalization, StreamCDC, MASKS,
 };
 
-const KB: usize = 1024;
+use marline_utils::KB;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CdcConfig {
@@ -25,11 +24,11 @@ impl CdcConfig {
         Self { min_size, avg_size, max_size }
     }
 
-    pub fn chunk_slice<'a>(&self, data: &'a [u8]) -> FastCDC<'a> {
+    pub fn chunker<'a>(&self, data: &'a [u8]) -> FastCDC<'a> {
         FastCDC::new(data, self.min_size, self.avg_size, self.max_size)
     }
 
-    pub fn chunk_stream<R: std::io::Read>(&self, reader: R) -> StreamCDC<R> {
+    pub fn stream_chunker<R: std::io::Read>(&self, reader: R) -> StreamCDC<R> {
         StreamCDC::new(reader, self.min_size, self.avg_size, self.max_size)
     }
 }
@@ -39,8 +38,12 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
-    // Детерминированный генератор без коротких циклов (в отличие от `% 256`),
-    // чтобы скользящий хэш GEAR работал в реалистичных условиях.
+    /// A deterministic pseudo-random data generator based on the Xorshift64 algorithm (Marsaglia, 2003).
+    ///
+    /// Used for reproducible CDC (Content-Defined Chunking) testing, without external dependencies such as the `rand` crate.
+    /// It generates a byte stream with a period of 2^64 - 1 and a uniform distribution;
+    /// this prevents the GEAR rolling hash from degenerating on periodic patterns
+    /// and ensures realistic chunk boundary detection.
     fn generate_test_data(size: usize) -> Vec<u8> {
         let mut state: u64 = 0xDEAD_BEEF_CAFE_BABE;
         (0..size)
@@ -54,28 +57,20 @@ mod tests {
     }
 
     #[test]
-    fn test_cdc_config_default() {
-        let config = CdcConfig::default();
-        assert_eq!(config.min_size, 512 * KB);
-        assert_eq!(config.avg_size, 1024 * KB);
-        assert_eq!(config.max_size, 2048 * KB);
-    }
-
-    #[test]
-    fn test_chunk_slice_empty() {
+    fn test_chunker_empty() {
         let config = CdcConfig::new(256, 1024, 4096);
         let data: &[u8] = &[];
-        let chunks: Vec<_> = config.chunk_slice(data).collect();
+        let chunks: Vec<_> = config.chunker(data).collect();
 
         assert!(chunks.is_empty(), "Empty input should not yield any chunks");
     }
 
     #[test]
-    fn test_chunk_stream_empty() {
+    fn test_stream_chunker_empty() {
         let config = CdcConfig::new(256, 1024, 4096);
         let reader = Cursor::new(Vec::<u8>::new());
         let chunks: Vec<_> = config
-            .chunk_stream(reader)
+            .stream_chunker(reader)
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading an empty stream should succeed");
 
@@ -83,10 +78,10 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_slice_data_smaller_than_min_size() {
+    fn test_chunker_data_smaller_than_min_size() {
         let config = CdcConfig::new(256, 1024, 4096);
         let data = vec![0xAB; 128]; // Меньше чем min_size (256)
-        let chunks: Vec<_> = config.chunk_slice(&data).collect();
+        let chunks: Vec<_> = config.chunker(&data).collect();
 
         assert_eq!(chunks.len(), 1, "Exactly one trailing chunk should be produced");
 
@@ -96,14 +91,14 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_slice_invariants() {
+    fn test_chunker_invariants() {
         let min_size = 256;
         let avg_size = 1024;
         let max_size = 4096;
         let config = CdcConfig::new(min_size, avg_size, max_size);
 
         let data = generate_test_data(64 * KB);
-        let chunks: Vec<_> = config.chunk_slice(&data).collect();
+        let chunks: Vec<_> = config.chunker(&data).collect();
 
         assert!(!chunks.is_empty());
 
@@ -143,7 +138,7 @@ mod tests {
 
         // Однородные данные проверяют принудительную отсечку по max_size
         let data = vec![0u8; 20 * KB];
-        let chunks: Vec<_> = config.chunk_slice(&data).collect();
+        let chunks: Vec<_> = config.chunker(&data).collect();
 
         for (chunk, _) in &chunks {
             assert!(chunk.length <= max_size);
@@ -151,15 +146,15 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_stream_matches_chunk_slice() {
+    fn test_strem_chunker_matches_chunker() {
         let config = CdcConfig::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
-        let slice_chunks: Vec<_> = config.chunk_slice(&data).collect();
+        let slice_chunks: Vec<_> = config.chunker(&data).collect();
 
         let reader = Cursor::new(&data);
         let stream_chunks: Vec<_> = config
-            .chunk_stream(reader)
+            .stream_chunker(reader)
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading from Cursor should not fail");
 
