@@ -120,7 +120,7 @@ const LINEAR_COEFFICIENTS: [u64; 12] = [
 // The program to produce this table is named table64.rs in examples.
 //
 #[rustfmt::skip]
-pub const GEAR: [u64; 256] = [
+const GEAR: [u64; 256] = [
     0x3b5d3c7d207e37dc, 0x784d68ba91123086, 0xcd52880f882e7298, 0xeacf8e4e19fdcca7,
     0xc31f385dfbd1632b, 0x1d5f27001e25abe6, 0x83130bde3c9ad991, 0xc4b225676e9b7649,
     0xaa329b29e08eb499, 0xb67fcbd21e577d58, 0x0027baaada2acf6b, 0xe3ef2d5ac73c2226,
