@@ -10,6 +10,7 @@ mod test {
     use marline_scrub::decoder::{GdeltaDecoder, LevenshteinDecoder};
     use marline_scrub::encoder::{GdeltaEncoder, LevenshteinEncoder};
     use marline_scrub::{clusterer, SBCMap, SBCScrubber};
+    use marline_sketcher::SpeedSketchConfig;
 
     use std::collections::HashMap;
 
@@ -60,6 +61,27 @@ mod test {
         let read = fs.read_file_complete(&handle).unwrap();
         assert_eq!(read, data);
     }
+    #[test]
+    fn test_data_recovery_speedsketch_custom_masks() {
+        let config = SpeedSketchConfig::uniform(7, 99).unwrap();
+        let mut fs = FileSystem::new_with_scrubber(
+            HashMap::default(),
+            SBCMap::new(GdeltaDecoder::default()),
+            Box::new(SBCScrubber::new_speedsketch(config, clusterer::EqClusterer::new(0), false)),
+            Sha256Hasher::default(),
+        );
+        let mut handle = fs.create_file("file".to_string(), SuperChunker::default()).unwrap();
+        let data = generate_data(2);
+        fs.write_to_file(&mut handle, &data).unwrap();
+        fs.close_file(handle).unwrap();
+
+        let _res = fs.scrub().unwrap();
+
+        let handle = fs.open_file("file", SuperChunker::default()).unwrap();
+        let read = fs.read_file_complete(&handle).unwrap();
+        assert_eq!(read, data);
+    }
+
     const MB: usize = 1024 * 1024;
 
     fn generate_data(mb_size: usize) -> Vec<u8> {

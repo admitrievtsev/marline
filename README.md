@@ -51,7 +51,7 @@ fn main() -> std::io::Result<()> {
     let data = vec![10; 1024 * 1024];
     
     // Configure chunking parameters
-    let chunk_size = SizeParams::new(2 * 1024, 8 * 1024, 16 * 1024);
+    let chunk_size = SizeParams::new(4 * 1024, 8 * 1024, 64 * 1024);
     
     // Initialize filesystem with SBC scrubber
     let mut fs = FileSystem::new_with_scrubber(
@@ -135,6 +135,25 @@ Example applications and benchmarks.
 |-------------------|-------------|------|
 | `AronovichHasher` | Similarity-based hash | Medium |
 | `OdessHasher`     | Advanced sketching | Fast |
+| `SpeedSketchHasher` | Mask-based sketching | Fast |
+
+### SpeedSketch mask configuration
+
+`SpeedSketchConfig` generates one mask set from two popcounts and a deterministic seed. The
+default is `feature_popcount = 8`, `bloom_popcount = 5`, `seed = 12345`, selected for FastCDC
+with 4/8/64 KiB minimum/average/maximum chunk sizes. Masks are generated once when the
+configuration is created and reused for the whole run.
+
+```rust
+use marline_scrub::{clusterer, SBCScrubber};
+use marline_sketcher::SpeedSketchConfig;
+
+let config = SpeedSketchConfig::new(8, 5, 12345)?;
+let scrubber = SBCScrubber::new_speedsketch(config, clusterer::EqClusterer::new(0), false);
+```
+
+`SBCScrubber::new_speedsketch` shares the same generated configuration between the hasher and
+the delta encoder, so their sketches always use the same masks and configuration identifier.
 
 ## 📊 Performance
 

@@ -311,7 +311,7 @@ impl GraphClusterer {
         sbc_hash: Hash,
         data_container: &'a mut &'a mut chunkfs::DataContainer<crate::SBCKey<Hash>>,
     ) {
-        let cluster = clusters.0.entry(Hash::new_with_u32(parent_key)).or_default();
+        let cluster = clusters.0.entry(sbc_hash.new_with_u32_like(parent_key)).or_default();
         cluster.push((sbc_hash, data_container));
     }
 }

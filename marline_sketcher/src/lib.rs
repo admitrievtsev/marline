@@ -1,6 +1,6 @@
 pub use aronovich_hash::{AronovichHash, AronovichHasher};
 pub use odess_hasher::{OdessHash, OdessHasher};
-pub use speedsketch::{SpeedSketchHash, SpeedSketchHasher};
+pub use speedsketch::{MaskError, MaskSet, SpeedSketchConfig, SpeedSketchHash, SpeedSketchHasher};
 use std::hash;
 
 mod aronovich_hash;
@@ -11,6 +11,13 @@ pub mod speedsketch;
 pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
     /// Creates a new hash instance from a 32-bit unsigned integer key.
     fn new_with_u32(key: u32) -> Self;
+
+    /// Creates a new hash instance from a 32-bit key while preserving this hash's settings.
+    ///
+    /// Hashers whose hashes depend on per-instance configuration should override this method.
+    fn new_with_u32_like(&self, key: u32) -> Self {
+        Self::new_with_u32(key)
+    }
 
     /// Generates the successor hash in the similarity hash sequence.
     /// Used when exploring adjacent hashes in clustering operations.
@@ -32,6 +39,14 @@ pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
     /// cannot be present in the base chunk. Hashers that do not build a sketch return
     /// `None`, and the encoder then computes it on demand.
     fn sketch(&self) -> Option<u64> {
+        None
+    }
+
+    /// Returns the identifier of the mask configuration used to build the sketch, when known.
+    ///
+    /// The delta encoder uses it to reject chunks whose sketch was produced by a different
+    /// configuration.
+    fn sketch_config_id(&self) -> Option<u64> {
         None
     }
 }
