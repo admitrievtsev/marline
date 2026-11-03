@@ -20,3 +20,7 @@ blake3 = "1.8.5"
 [[bin]]
 name = "palantir_metrics"
 path = "src/bin/palantir_metrics.rs"
+
+[[bin]]
+name = "palantir_lifecycle_bench"
+path = "src/bin/palantir_lifecycle_bench.rs"
