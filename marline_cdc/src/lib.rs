@@ -8,9 +8,9 @@ use marline_utils::KB;
 
 #[derive(Debug, Clone, Copy)]
 pub struct CdcConfig {
-    pub min_size: usize,
-    pub avg_size: usize,
-    pub max_size: usize,
+    min_size: usize,
+    avg_size: usize,
+    max_size: usize,
 }
 
 impl Default for CdcConfig {
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn test_chunker_data_smaller_than_min_size() {
         let config = CdcConfig::new(256, 1024, 4096);
-        let data = vec![0xAB; 128]; // Меньше чем min_size (256)
+        let data = vec![0xAB; 128]; // Smaller than min_size (256)
         let chunks: Vec<_> = config.chunker(&data).collect();
 
         assert_eq!(chunks.len(), 1, "Exactly one trailing chunk should be produced");
@@ -136,7 +136,7 @@ mod tests {
         let max_size = 4096;
         let config = CdcConfig::new(min_size, avg_size, max_size);
 
-        // Однородные данные проверяют принудительную отсечку по max_size
+        // Uniform data exercises the forced cut at max_size
         let data = vec![0u8; 20 * KB];
         let chunks: Vec<_> = config.chunker(&data).collect();
 
@@ -146,7 +146,7 @@ mod tests {
     }
 
     #[test]
-    fn test_strem_chunker_matches_chunker() {
+    fn test_stream_chunker_matches_chunker() {
         let config = CdcConfig::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
@@ -171,7 +171,7 @@ mod tests {
             let length = slice_chunk.length;
 
             assert_eq!(offset, stream_chunk.offset as usize, "Offset mismatch");
-            assert_eq!(length, stream_chunk.length as usize, "Length mismatch");
+            assert_eq!(length, stream_chunk.length, "Length mismatch");
             assert_eq!(slice_chunk.hash, stream_chunk.hash, "Hash mismatch");
             assert_eq!(slice_feat, stream_feat, "Extracted features mismatch");
             assert_eq!(
