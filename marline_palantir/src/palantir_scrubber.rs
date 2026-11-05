@@ -5,9 +5,8 @@ use std::io;
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
-use marline_scrub::decoder::{Decoder, GdeltaDecoder};
 
-use crate::encoder::PalantirEncoder;
+use crate::codec::PalantirCodec;
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
 use crate::mock_rocksdb::MockRocksDBMap;
@@ -29,15 +28,15 @@ use marline_index::index::IndexError;
 pub struct PalantirScrubber<
     S,
     H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static,
-    E,
+    C,
     const N: usize,
 > {
     /// The super-feature generator.
     sf_gen: S,
     /// Multi-tier similarity index.
     metadata_manager: MetadataManager<H, N>,
-    /// Delta encoder.
-    encoder: E,
+    /// Delta codec.
+    codec: C,
     /// False-positive threshold for delta encoding ratio.
     fp_threshold: f64,
     /// Total chunks processed.
@@ -48,8 +47,8 @@ pub struct PalantirScrubber<
     delta_bases: HashMap<H, H>,
 }
 
-impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: usize>
-    PalantirScrubber<S, H, E, N>
+impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, C, const N: usize>
+    PalantirScrubber<S, H, C, N>
 {
     /// Creates a new `PalantirScrubber`.
     ///
@@ -67,7 +66,7 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
     /// | `chunks_processed` | `0` |
     pub fn new(
         sf_gen: S,
-        encoder: E,
+        codec: C,
         tier_config: TierConfig<N>,
         lifecycle_configs: [LifecycleTierConfig; N],
         search_config: SearchConfig,
@@ -75,7 +74,7 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
         Self {
             sf_gen,
             metadata_manager: MetadataManager::new(tier_config, lifecycle_configs, &search_config),
-            encoder,
+            codec,
             fp_threshold: 0.9,
             chunks_processed: 0,
             delta_stored: 0,
@@ -104,12 +103,34 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
     }
 }
 
-impl<B, S, E, const N: usize> Scrub<[u8; 32], B, [u8; 32], MockRocksDBMap>
-    for PalantirScrubber<S, [u8; 32], E, N>
+impl<S, C, const N: usize> PalantirScrubber<S, [u8; 32], C, N> {
+    pub fn reconstruct(&self, target_map: &MockRocksDBMap, hash: &[u8; 32]) -> io::Result<Vec<u8>>
+    where
+        C: PalantirCodec,
+    {
+        let mut chain = Vec::new();
+        let mut current = *hash;
+        while let Some(&base) = self.delta_bases.get(&current) {
+            chain.push(current);
+            current = base;
+        }
+
+        let mut data = target_map.get(&current)?;
+        for delta_hash in chain.iter().rev() {
+            let compressed = target_map.get(delta_hash)?;
+            let delta = zstd::decode_all(compressed.as_slice())?;
+            data = self.codec.decode(&data, &delta);
+        }
+        Ok(data)
+    }
+}
+
+impl<B, S, C, const N: usize> Scrub<[u8; 32], B, [u8; 32], MockRocksDBMap>
+    for PalantirScrubber<S, [u8; 32], C, N>
 where
     B: IterableDatabase<[u8; 32], DataContainer<[u8; 32]>>,
     S: SuperFeatureGenerator,
-    E: PalantirEncoder,
+    C: PalantirCodec,
 {
     fn scrub<'a>(
         &mut self,
@@ -133,9 +154,9 @@ where
                         None => {
                             match self.metadata_manager.lookup_super_features(&super_features) {
                                 Some((base_hash, _)) => {
-                                    match decoder(target_map, &self.delta_bases, &base_hash.hash) {
+                                    match self.reconstruct(target_map, &base_hash.hash) {
                                         Ok(base_data) => {
-                                            let delta = self.encoder.encode(chunk_data, &base_data);
+                                            let delta = self.codec.encode(chunk_data, &base_data);
                                             let delta_compressed =
                                                 zstd::encode_all(delta.as_slice(), 0)?;
                                             let simple_compressed =
@@ -143,8 +164,10 @@ where
                                             let ratio = delta_compressed.len() as f64
                                                 / simple_compressed.len() as f64;
                                             if ratio < self.fp_threshold {
-                                                target_map.insert(hash.clone(), delta_compressed)?;
-                                                self.delta_bases.insert(hash.clone(), base_hash.hash.clone());
+                                                target_map
+                                                    .insert(hash.clone(), delta_compressed)?;
+                                                self.delta_bases
+                                                    .insert(hash.clone(), base_hash.hash.clone());
                                                 self.delta_stored += 1;
                                             } else {
                                                 target_map
@@ -184,23 +207,4 @@ where
             clusterization_report: None,
         })
     }
-}
-
-fn decoder(
-    target_map: &MockRocksDBMap,
-    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
-    hash: &[u8; 32],
-) -> io::Result<Vec<u8>> {
-    let mut chain = Vec::new();
-    let mut cur = *hash;
-    while let Some(&base) = delta_bases.get(&cur) {
-        chain.push(cur);
-        cur = base;
-    }
-    let mut data = target_map.get(&cur)?;
-    for &dh in chain.iter().rev() {
-        let compressed = target_map.get(&dh)?;
-        data = GdeltaDecoder::new(true).decode_chunk(data, &compressed);
-    }
-    Ok(data)
 }

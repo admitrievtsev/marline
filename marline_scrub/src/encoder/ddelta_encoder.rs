@@ -128,49 +128,73 @@ impl DdeltaEncoder {
         source_chunks_indices: &mut HashMap<u64, usize>,
         source_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
-        let mut delta_code: Vec<u8> = Vec::new();
-        let target_chunks = gear_chunking(target_data);
-
-        for mut target_chunk_position in 0..target_chunks.len() {
-            let target_chunk = target_chunks[target_chunk_position];
-            match self.edelta_optimizations {
-                Some(EdeltaOptimizations::SpeedIsPriority) => process_target_chunk_with_edelta(
-                    source_data,
-                    target_data,
-                    source_chunks_indices,
-                    &target_chunks,
-                    &mut target_chunk_position,
-                    &mut delta_code,
-                    EdeltaOptimizations::SpeedIsPriority,
-                ),
-                Some(EdeltaOptimizations::CompressionIsPriority) => {
-                    process_target_chunk_with_edelta(
-                        source_data,
-                        target_data,
-                        source_chunks_indices,
-                        &target_chunks,
-                        &mut target_chunk_position,
-                        &mut delta_code,
-                        EdeltaOptimizations::CompressionIsPriority,
-                    );
-                }
-                None => process_target_chunk_with_ddelta(
-                    source_data,
-                    source_chunks_indices,
-                    target_chunk,
-                    &mut delta_code,
-                ),
-            }
-
-            if target_chunk_position >= target_chunks.len() {
-                break;
-            }
-        }
+        let delta_code = match &self.edelta_optimizations {
+            None => ddelta_diff_with_index(target_data, source_data, source_chunks_indices),
+            Some(optimization) => ddelta_edelta_with_index(
+                target_data,
+                source_data,
+                source_chunks_indices,
+                optimization,
+            ),
+        };
 
         let (processed_data, sbc_hash) =
             store_delta_chunk(target_map, target_hash, source_hash, delta_code);
         (0, processed_data, sbc_hash)
     }
+}
+
+pub fn ddelta_diff(new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
+    let source_chunks = gear_chunking(base_chunk);
+    let source_chunks_indices = build_chunks_indices(&source_chunks);
+    ddelta_diff_with_index(new_chunk, base_chunk, &source_chunks_indices)
+}
+
+fn ddelta_diff_with_index(
+    new_chunk: &[u8],
+    base_chunk: &[u8],
+    source_chunks_indices: &HashMap<u64, usize>,
+) -> Vec<u8> {
+    let mut delta_code = Vec::new();
+    for target_chunk in gear_chunking(new_chunk) {
+        process_target_chunk_with_ddelta(
+            base_chunk,
+            source_chunks_indices,
+            target_chunk,
+            &mut delta_code,
+        );
+    }
+    delta_code
+}
+
+fn ddelta_edelta_with_index(
+    target_data: &[u8],
+    source_data: &[u8],
+    source_chunks_indices: &mut HashMap<u64, usize>,
+    optimization: &EdeltaOptimizations,
+) -> Vec<u8> {
+    let mut delta_code = Vec::new();
+    let target_chunks = gear_chunking(target_data);
+    for mut target_chunk_position in 0..target_chunks.len() {
+        process_target_chunk_with_edelta(
+            source_data,
+            target_data,
+            source_chunks_indices,
+            &target_chunks,
+            &mut target_chunk_position,
+            &mut delta_code,
+            match optimization {
+                EdeltaOptimizations::SpeedIsPriority => EdeltaOptimizations::SpeedIsPriority,
+                EdeltaOptimizations::CompressionIsPriority => {
+                    EdeltaOptimizations::CompressionIsPriority
+                }
+            },
+        );
+        if target_chunk_position >= target_chunks.len() {
+            break;
+        }
+    }
+    delta_code
 }
 
 fn process_target_chunk_with_edelta(
@@ -506,7 +530,7 @@ fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::decoder;
+    use crate::decoder::{self, Decoder, GdeltaDecoder};
     use crate::encoder::ddelta_encoder::EdeltaOptimizations::{
         CompressionIsPriority, SpeedIsPriority,
     };
@@ -516,6 +540,23 @@ mod test {
 
     use rand::prelude::StdRng;
     use rand::{rng, RngExt, SeedableRng};
+
+    #[test]
+    fn ddelta_diff_round_trips_edit_cases() {
+        let base = (0..128).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut changed = base.clone();
+        changed[64] ^= 0xff;
+        let mut inserted = base.clone();
+        inserted.splice(48..48, [9, 8, 7]);
+        let mut deleted = base.clone();
+        deleted.drain(48..51);
+        let cases = [base.clone(), changed, inserted, deleted, b"short chunk".to_vec()];
+
+        for new_chunk in cases {
+            let delta = ddelta_diff(&new_chunk, &base);
+            assert_eq!(GdeltaDecoder::new(false).decode_chunk(base.clone(), &delta), new_chunk);
+        }
+    }
 
     #[test]
     fn process_target_chunk_with_edelta_should_process_full_match_with_compression_priority() {

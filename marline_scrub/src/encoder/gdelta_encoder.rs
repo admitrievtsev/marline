@@ -170,7 +170,12 @@ impl Encoder for GdeltaEncoder {
 pub fn gdelta_diff(new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
     let word_size: usize = 16;
     if new_chunk.len() < word_size || base_chunk.len() < word_size {
-        return new_chunk.to_vec();
+        let mut insert_instruction = (new_chunk.len() as u32).to_ne_bytes();
+        insert_instruction[2] |= 1 << 7;
+        let mut delta_code = Vec::with_capacity(3 + new_chunk.len());
+        delta_code.extend_from_slice(&insert_instruction[..3]);
+        delta_code.extend_from_slice(new_chunk);
+        return delta_code;
     }
     let move_bts: usize = 64 / word_size;
     let mask_bts: usize = (base_chunk.len() as f64).log2() as usize;
@@ -317,3 +322,26 @@ pub(crate) const GEAR: [u64; 256] = [
     0xfb1e6e22e08a03b3, 0xea635fdba3698dd0, 0xcf53659328503a5c, 0xcde3b31e6fd5d780,
     0x8e3e4221d3614413, 0xef14d0d86bf1a22c, 0xe1d830d3f16c5ddb, 0xaabd2b2a451504e1
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::gdelta_diff;
+    use crate::decoder::{Decoder, GdeltaDecoder};
+
+    #[test]
+    fn gdelta_diff_round_trips_edit_cases() {
+        let base = (0..128).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut changed = base.clone();
+        changed[64] ^= 0xff;
+        let mut inserted = base.clone();
+        inserted.splice(48..48, [9, 8, 7]);
+        let mut deleted = base.clone();
+        deleted.drain(48..51);
+        let cases = [base.clone(), changed, inserted, deleted, b"short chunk".to_vec()];
+
+        for new_chunk in cases {
+            let delta = gdelta_diff(&new_chunk, &base);
+            assert_eq!(GdeltaDecoder::new(false).decode_chunk(base.clone(), &delta), new_chunk);
+        }
+    }
+}

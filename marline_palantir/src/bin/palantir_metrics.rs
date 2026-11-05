@@ -13,7 +13,7 @@ use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, FileSystem, Scrub, ScrubMeasurements};
 use clap::{Parser, ValueEnum};
 use marline_index::heuristic_index::SearchConfig;
-use marline_palantir::encoder::GdeltaEncoder;
+use marline_palantir::codec::{AnyCodec, DdeltaCodec, GdeltaCodec, XdeltaCodec};
 use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
 use marline_palantir::mock_rocksdb::MockRocksDBMap;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
@@ -52,6 +52,31 @@ enum Regime {
     Regime2,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CodecKind {
+    Gdelta,
+    Xdelta,
+    Ddelta,
+}
+
+impl CodecKind {
+    fn build(self) -> AnyCodec {
+        match self {
+            Self::Gdelta => AnyCodec::Gdelta(GdeltaCodec),
+            Self::Xdelta => AnyCodec::Xdelta(XdeltaCodec),
+            Self::Ddelta => AnyCodec::Ddelta(DdeltaCodec),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Gdelta => "gdelta",
+            Self::Xdelta => "xdelta",
+            Self::Ddelta => "ddelta",
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "palantir_metrics",
@@ -72,6 +97,9 @@ struct Cli {
 
     #[arg(long, value_delimiter = ',')]
     tiers: Vec<String>,
+
+    #[arg(long, value_enum, value_delimiter = ',', default_value = "gdelta")]
+    codecs: Vec<CodecKind>,
 
     #[arg(long, default_value_t = 7)]
     sampling_rate: u64,
@@ -271,7 +299,7 @@ fn materialize(case: &Case, cli: &Cli) -> Result<Vec<(String, PathBuf)>, Box<dyn
 }
 
 type Db = HashMap<[u8; 32], DataContainer<[u8; 32]>>;
-type Palantir<const N: usize> = PalantirScrubber<PalantirHasher, [u8; 32], GdeltaEncoder, N>;
+type Palantir<const N: usize> = PalantirScrubber<PalantirHasher, [u8; 32], AnyCodec, N>;
 
 struct SharedScrubber<const N: usize> {
     inner: Rc<RefCell<Palantir<N>>>,
@@ -342,6 +370,7 @@ fn run_timeline<const N: usize>(
     lifecycle: [LifecycleTierConfig; N],
     params: &RunParams,
     sc: &SearchConfig,
+    codec: CodecKind,
     version_dirs: &[(String, PathBuf)],
 ) -> io::Result<RunOutcome> {
     let hasher = match tier.features_num {
@@ -355,7 +384,7 @@ fn run_timeline<const N: usize>(
         Some(fn_val) => TierConfig::with_features_num(arr, fn_val),
         None => TierConfig::new(arr),
     };
-    let scrubber = PalantirScrubber::new(hasher, GdeltaEncoder, tier_config, lifecycle, sc.clone());
+    let scrubber = PalantirScrubber::new(hasher, codec.build(), tier_config, lifecycle, sc.clone());
     let shared = Rc::new(RefCell::new(scrubber));
 
     let database: Db = HashMap::new();
@@ -431,6 +460,7 @@ fn run_for_tier(
     tier: &TierSpec,
     params: &RunParams,
     sc: &SearchConfig,
+    codec: CodecKind,
     version_dirs: &[(String, PathBuf)],
 ) -> io::Result<RunOutcome> {
     match tier.tiers.len() {
@@ -439,6 +469,7 @@ fn run_for_tier(
             LifecycleManager::<1>::default_configs(),
             params,
             sc,
+            codec,
             version_dirs,
         ),
         2 => run_timeline::<2>(
@@ -446,6 +477,7 @@ fn run_for_tier(
             LifecycleManager::<2>::default_configs(),
             params,
             sc,
+            codec,
             version_dirs,
         ),
         3 => run_timeline::<3>(
@@ -453,6 +485,7 @@ fn run_for_tier(
             LifecycleManager::<3>::default_configs(),
             params,
             sc,
+            codec,
             version_dirs,
         ),
         4 => run_timeline::<4>(
@@ -460,6 +493,7 @@ fn run_for_tier(
             LifecycleManager::<4>::default_configs(),
             params,
             sc,
+            codec,
             version_dirs,
         ),
         5 => run_timeline::<5>(
@@ -467,6 +501,7 @@ fn run_for_tier(
             LifecycleManager::<5>::default_configs(),
             params,
             sc,
+            codec,
             version_dirs,
         ),
         n => Err(io::Error::new(
@@ -484,6 +519,7 @@ struct Row {
     n_versions: usize,
     synthetic_slice: bool,
     tier: String,
+    codec: String,
     tier_list: String,
     features_num: usize,
     tier_n: usize,
@@ -519,6 +555,7 @@ fn build_row(
     cli: &Cli,
     case: &Case,
     tier: &TierSpec,
+    codec: CodecKind,
     sc: &SearchConfig,
     outcome: &RunOutcome,
 ) -> Row {
@@ -537,6 +574,7 @@ fn build_row(
         n_versions: versions.len(),
         synthetic_slice: matches!(cli.regime, Regime::Regime2),
         tier: tier.name.clone(),
+        codec: codec.name().to_string(),
         tier_list: tier.tiers.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("-"),
         features_num: features_num_of(tier),
         tier_n: tier.tiers.len(),
@@ -565,6 +603,9 @@ fn build_row(
 fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
     let tiers = resolve_tiers(&cli.tiers)?;
+    if cli.codecs.is_empty() {
+        return Err("at least one codec must be selected".into());
+    }
     let search_configs = build_search_configs(&cli);
     let cases = resolve_cases(&cli)?;
 
@@ -583,10 +624,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     eprintln!(
-        "regime={:?} cases={} tiers={} search_configs={} out={}",
+        "regime={:?} cases={} tiers={} codecs={} search_configs={} out={}",
         cli.regime,
         cases.len(),
         tiers.len(),
+        cli.codecs.iter().map(|codec| codec.name()).collect::<Vec<_>>().join(","),
         search_configs.len(),
         cli.out.display()
     );
@@ -595,22 +637,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         let version_dirs = materialize(case, &cli)?;
         eprintln!("== case {} ==", case.label);
         for tier in &tiers {
-            for sc in &search_configs {
-                let outcome = run_for_tier(tier, &params, sc, &version_dirs)?;
-                let row = build_row(&cli, case, tier, sc, &outcome);
-                eprintln!(
-                    "  {:<16} cdc={:.4} total={:.4} gain={:+.4} stored_mb={:.3} elapsed_s={:.2} mbps={:.2} deltas={}",
-                    tier.name,
-                    row.cdc_ratio,
-                    row.total_dedup,
-                    row.delta_gain,
-                    row.stored_mb,
-                    row.elapsed_s,
-                    row.mbps,
-                    row.delta_stored,
-                );
-                writer.serialize(&row)?;
-                writer.flush()?;
+            for codec in &cli.codecs {
+                for sc in &search_configs {
+                    eprintln!("  codec={} tier={}", codec.name(), tier.name);
+                    let outcome = run_for_tier(tier, &params, sc, *codec, &version_dirs)?;
+                    let row = build_row(&cli, case, tier, *codec, sc, &outcome);
+                    eprintln!(
+                        "  {:<7} {:<16} cdc={:.4} total={:.4} gain={:+.4} stored_mb={:.3} elapsed_s={:.2} mbps={:.2} deltas={}",
+                        row.codec,
+                        tier.name,
+                        row.cdc_ratio,
+                        row.total_dedup,
+                        row.delta_gain,
+                        row.stored_mb,
+                        row.elapsed_s,
+                        row.mbps,
+                        row.delta_stored,
+                    );
+                    writer.serialize(&row)?;
+                    writer.flush()?;
+                }
             }
         }
     }

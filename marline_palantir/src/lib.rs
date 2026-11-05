@@ -14,8 +14,8 @@
 //!    features.  Features are grouped by tier and hashed into super-features.
 //! 2. **Index lookup** — Super-features are split into fixed-size sketches
 //!    and queried against a multi-tier [`metadata_manager::MetadataManager`].
-//! 3. **Delta encoding** — If a similar base chunk is found, the encoder
-//!    ([`encoder::PalantirEncoder`]) produces a delta; otherwise the raw chunk
+//! 3. **Delta encoding** — If a similar base chunk is found, the codec
+//!    ([`codec::PalantirCodec`]) produces a delta; otherwise the raw chunk
 //!    is stored.
 //! 4. **Scrubbing** — [`palantir_scrubber::PalantirScrubber`] orchestrates
 //!    the full pipeline (feature generation → lookup → delta-or-store) for
@@ -27,7 +27,7 @@
 //! |--------|-------------|
 //! | [`types`] | Core data types: [`Chunk`], [`SuperFeature`], [`ChunkDigest`], [`TierConfig`] |
 //! | [`sf_generator`] | Feature generation: [`PalantirHasher`] and the [`SuperFeatureGenerator`] trait |
-//! | [`encoder`] | Delta encoding: [`PalantirEncoder`] trait and [`GdeltaEncoder`] |
+//! | [`codec`] | Delta encoding and reconstruction: [`PalantirCodec`] and codec implementations |
 //! | [`palantir_scrubber`] | Scrubbing pipeline: [`PalantirScrubber`] |
 //! | [`error`] | Error types for the crate |
 //! | [`metadata_manager`] | Metadata management: [`MetadataManager`] — fingerprint and super-feature index |
@@ -37,15 +37,15 @@
 //! ```rust,ignore
 //! use marline_palantir::sf_generator::PalantirHasher;
 //! use marline_palantir::palantir_scrubber::PalantirScrubber;
-//! use marline_palantir::encoder::GdeltaEncoder;
+//! use marline_palantir::codec::GdeltaCodec;
 //! use marline_palantir::types::TierConfig;
 //! use marline_palantir::lifecycle_manager::LifecycleManager;
 //!
 //! let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
-//! let encoder = GdeltaEncoder;
+//! let codec = GdeltaCodec;
 //! let tier_config = TierConfig::new([4, 3, 2]);
 //! let lifecycle_configs = LifecycleManager::default_configs();
-//! let mut scrubber = PalantirScrubber::new(sf_gen, encoder, tier_config, lifecycle_configs);
+//! let mut scrubber = PalantirScrubber::new(sf_gen, codec, tier_config, lifecycle_configs, Default::default());
 //! ```
 //!
 //! [`Chunk`]: types::Chunk
@@ -54,14 +54,13 @@
 //! [`ChunkDigest`]: types::ChunkDigest
 //! [`TierConfig`]: types::TierConfig
 //! [`PalantirHasher`]: sf_generator::PalantirHasher
-//! [`PalantirEncoder`]: encoder::PalantirEncoder
-//! [`GdeltaEncoder`]: encoder::GdeltaEncoder
+//! [`PalantirCodec`]: codec::PalantirCodec
 //! [`MetadataManager`]: metadata_manager::MetadataManager
 //! [`PalantirScrubber`]: palantir_scrubber::PalantirScrubber
 //!
 #![allow(clippy::clone_on_copy, clippy::should_implement_trait, clippy::new_without_default)]
 
-pub mod encoder;
+pub mod codec;
 pub mod error;
 pub mod lifecycle_manager;
 pub mod metadata_manager;

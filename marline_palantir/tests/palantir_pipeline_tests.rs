@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, Database, Hasher, Scrub};
-use marline_palantir::encoder::GdeltaEncoder;
+use marline_index::heuristic_index::SearchConfig;
+use marline_palantir::codec::{DdeltaCodec, GdeltaCodec, PalantirCodec, XdeltaCodec};
 use marline_palantir::lifecycle_manager::LifecycleManager;
 use marline_palantir::metadata_manager::MetadataManager;
 use marline_palantir::mock_rocksdb::MockRocksDBMap;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
-use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::{BlockID, Chunk, SuperFeatureGenerator, TierConfig};
 
@@ -20,7 +20,11 @@ fn identical_chunks() {
     let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
     let tier_config = TierConfig::new([4, 3, 2]);
     let lifecycle_configs = LifecycleManager::<3>::default_configs();
-    let mut mm = MetadataManager::<[u8; 32], 3>::new(tier_config, lifecycle_configs, &SearchConfig::default());
+    let mut mm = MetadataManager::<[u8; 32], 3>::new(
+        tier_config,
+        lifecycle_configs,
+        &SearchConfig::default(),
+    );
 
     let base: Vec<u8> = b"This is a base chunk for the Palantir similarity pipeline. \
                            It has enough bytes for the gear-hash rolling hash to produce \
@@ -36,18 +40,28 @@ fn identical_chunks() {
     assert!(found.is_some(), "Identical chunk not found via fingerprint lookup");
 }
 
-#[test]
-fn similar_chunks() {
+fn similar_chunks_round_trip<C: PalantirCodec + Copy>(codec: C) {
     let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
-    let encoder = GdeltaEncoder;
     let tier_config = TierConfig::new([4, 3, 2]);
     let lifecycle_configs = LifecycleManager::<3>::default_configs();
-    let mut scrubber = PalantirScrubber::new(sf_gen, encoder, tier_config, lifecycle_configs, SearchConfig::default());
+    let mut scrubber = PalantirScrubber::new(
+        sf_gen,
+        codec,
+        tier_config,
+        lifecycle_configs,
+        SearchConfig::default(),
+    );
 
-    let base: Vec<u8> = (0..8192).map(|i| (i % 256) as u8).collect();
+    let mut state = 0x1234_5678u32;
+    let base: Vec<u8> = (0..65536)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
     let mut similar = base.clone();
-    for i in 4096..4916 {
-        similar[i] = similar[i].wrapping_add(7);
+    for byte in similar.iter_mut().take(4916).skip(4096) {
+        *byte = byte.wrapping_add(7);
     }
 
     let hash_base = hash_data(&base);
@@ -69,7 +83,8 @@ fn similar_chunks() {
         .count();
     assert!(
         delta_count >= 1,
-        "At least one chunk should be delta-encoded, got {} deltas",
+        "At least one chunk should be delta-encoded for {}, got {} deltas",
+        codec.name(),
         delta_count
     );
 
@@ -84,10 +99,29 @@ fn similar_chunks() {
         }
     }
 
+    for (hash, expected) in [(&hash_base, &base), (&hash_similar, &similar)] {
+        assert_eq!(scrubber.reconstruct(&target_map, hash).unwrap(), *expected);
+    }
+
     for hash in [&hash_base, &hash_similar] {
         match database.get(hash).unwrap().extract() {
             Data::TargetChunk(keys) => assert_eq!(keys.as_slice(), &[*hash]),
             _ => panic!("Expected TargetChunk after scrub"),
         }
     }
+}
+
+#[test]
+fn similar_chunks_round_trip_with_gdelta() {
+    similar_chunks_round_trip(GdeltaCodec);
+}
+
+#[test]
+fn similar_chunks_round_trip_with_xdelta() {
+    similar_chunks_round_trip(XdeltaCodec);
+}
+
+#[test]
+fn similar_chunks_round_trip_with_ddelta() {
+    similar_chunks_round_trip(DdeltaCodec);
 }

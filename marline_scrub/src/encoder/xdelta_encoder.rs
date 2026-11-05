@@ -64,35 +64,7 @@ impl XdeltaEncoder {
         word_hash_offsets: &HashMap<u32, Vec<usize>>,
         parent_hash: Hash,
     ) -> (usize, usize, SBCKey<Hash>) {
-        let mut delta_code = Vec::new();
-
-        let mut i = 0;
-        while i + BLOCK_SIZE <= chunk_data.len() {
-            let adler_hash_word = adler32(&chunk_data[i..i + BLOCK_SIZE]);
-
-            if !word_hash_offsets.contains_key(&adler_hash_word) {
-                encode_insert_sequence(
-                    chunk_data,
-                    &mut i,
-                    word_hash_offsets,
-                    &mut delta_code,
-                    adler_hash_word,
-                );
-            } else {
-                encode_copy_sequence(
-                    parent_data,
-                    chunk_data,
-                    &mut i,
-                    &mut delta_code,
-                    adler_hash_word,
-                    word_hash_offsets,
-                )
-            }
-        }
-        if i < chunk_data.len() {
-            let remaining_data = chunk_data[i..].to_vec();
-            encode_insert_instruction(remaining_data, &mut delta_code);
-        }
+        let delta_code = xdelta_diff_with_index(chunk_data, parent_data, word_hash_offsets);
 
         let (processed_data, sbc_hash) = prepare_and_store_delta_chunk(
             target_map,
@@ -103,6 +75,50 @@ impl XdeltaEncoder {
         );
         (0, processed_data, sbc_hash)
     }
+}
+
+pub fn xdelta_diff(new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
+    let word_hash_offsets = create_block_hashmap(base_chunk);
+    xdelta_diff_with_index(new_chunk, base_chunk, &word_hash_offsets)
+}
+
+fn xdelta_diff_with_index(
+    new_chunk: &[u8],
+    base_chunk: &[u8],
+    word_hash_offsets: &HashMap<u32, Vec<usize>>,
+) -> Vec<u8> {
+    let mut delta_code = Vec::new();
+    if new_chunk.len() < BLOCK_SIZE || base_chunk.len() < BLOCK_SIZE {
+        encode_insert_instruction(new_chunk.to_vec(), &mut delta_code);
+        return delta_code;
+    }
+
+    let mut i = 0;
+    while i + BLOCK_SIZE <= new_chunk.len() {
+        let adler_hash_word = adler32(&new_chunk[i..i + BLOCK_SIZE]);
+        if !word_hash_offsets.contains_key(&adler_hash_word) {
+            encode_insert_sequence(
+                new_chunk,
+                &mut i,
+                word_hash_offsets,
+                &mut delta_code,
+                adler_hash_word,
+            );
+        } else {
+            encode_copy_sequence(
+                base_chunk,
+                new_chunk,
+                &mut i,
+                &mut delta_code,
+                adler_hash_word,
+                word_hash_offsets,
+            )
+        }
+    }
+    if i < new_chunk.len() {
+        encode_insert_instruction(new_chunk[i..].to_vec(), &mut delta_code);
+    }
+    delta_code
 }
 
 impl Encoder for XdeltaEncoder {
@@ -325,13 +341,30 @@ fn create_block_hashmap(source_data: &[u8]) -> HashMap<u32, Vec<usize>> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::decoder;
+    use crate::decoder::{self, Decoder, GdeltaDecoder};
     use crate::encoder::encode_simple_chunk;
     use marline_sketcher::AronovichHash;
     use rand::prelude::StdRng;
     use rand::{RngExt, SeedableRng};
 
     const TEST_DATA_SIZE: usize = 8192;
+
+    #[test]
+    fn xdelta_diff_round_trips_edit_cases() {
+        let base = (0..128).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut changed = base.clone();
+        changed[64] ^= 0xff;
+        let mut inserted = base.clone();
+        inserted.splice(48..48, [9, 8, 7]);
+        let mut deleted = base.clone();
+        deleted.drain(48..51);
+        let cases = [base.clone(), changed, inserted, deleted, b"short chunk".to_vec()];
+
+        for new_chunk in cases {
+            let delta = xdelta_diff(&new_chunk, &base);
+            assert_eq!(GdeltaDecoder::new(false).decode_chunk(base.clone(), &delta), new_chunk);
+        }
+    }
 
     #[test]
     fn create_block_hashmap_should_return_empty_map_for_data_shorter_than_16_bytes() {
