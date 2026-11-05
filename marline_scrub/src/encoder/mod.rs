@@ -23,6 +23,7 @@ use rayon::ThreadPoolBuilder;
 use std::sync::{Arc, Mutex, MutexGuard};
 pub use xdelta_encoder::xdelta_diff;
 pub use xdelta_encoder::XdeltaEncoder;
+pub use zdelta_encoder::zdelta_diff;
 
 /// A trait for encoding data clusters using Similarity Based Chunking (SBC).
 ///

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, Database, Hasher, Scrub};
 use marline_index::heuristic_index::SearchConfig;
-use marline_palantir::codec::{DdeltaCodec, GdeltaCodec, PalantirCodec, XdeltaCodec};
+use marline_palantir::codec::{DdeltaCodec, GdeltaCodec, PalantirCodec, XdeltaCodec, ZdeltaCodec};
 use marline_palantir::lifecycle_manager::LifecycleManager;
 use marline_palantir::metadata_manager::MetadataManager;
 use marline_palantir::mock_rocksdb::MockRocksDBMap;
@@ -40,7 +40,7 @@ fn identical_chunks() {
     assert!(found.is_some(), "Identical chunk not found via fingerprint lookup");
 }
 
-fn similar_chunks_round_trip<C: PalantirCodec + Copy>(codec: C) {
+fn similar_chunks_round_trip<C: PalantirCodec + Copy>(codec: C, chunk_size: usize) {
     let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
     let tier_config = TierConfig::new([4, 3, 2]);
     let lifecycle_configs = LifecycleManager::<3>::default_configs();
@@ -53,14 +53,17 @@ fn similar_chunks_round_trip<C: PalantirCodec + Copy>(codec: C) {
     );
 
     let mut state = 0x1234_5678u32;
-    let base: Vec<u8> = (0..65536)
+    let base: Vec<u8> = (0..chunk_size)
         .map(|_| {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             (state >> 24) as u8
         })
         .collect();
     let mut similar = base.clone();
-    for byte in similar.iter_mut().take(4916).skip(4096) {
+    let mutation_start = if chunk_size < 8192 { chunk_size / 2 } else { 4096 };
+    let mutation_end =
+        if chunk_size < 8192 { chunk_size.min(mutation_start + 16) } else { chunk_size.min(4916) };
+    for byte in similar.iter_mut().take(mutation_end).skip(mutation_start) {
         *byte = byte.wrapping_add(7);
     }
 
@@ -113,15 +116,20 @@ fn similar_chunks_round_trip<C: PalantirCodec + Copy>(codec: C) {
 
 #[test]
 fn similar_chunks_round_trip_with_gdelta() {
-    similar_chunks_round_trip(GdeltaCodec);
+    similar_chunks_round_trip(GdeltaCodec, 65536);
 }
 
 #[test]
 fn similar_chunks_round_trip_with_xdelta() {
-    similar_chunks_round_trip(XdeltaCodec);
+    similar_chunks_round_trip(XdeltaCodec, 65536);
 }
 
 #[test]
 fn similar_chunks_round_trip_with_ddelta() {
-    similar_chunks_round_trip(DdeltaCodec);
+    similar_chunks_round_trip(DdeltaCodec, 65536);
+}
+
+#[test]
+fn similar_chunks_round_trip_with_zdelta() {
+    similar_chunks_round_trip(ZdeltaCodec, 512);
 }

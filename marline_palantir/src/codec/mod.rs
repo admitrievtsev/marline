@@ -1,5 +1,6 @@
-use marline_scrub::decoder::{Decoder, GdeltaDecoder};
-use marline_scrub::encoder::{ddelta_diff, gdelta_diff, xdelta_diff};
+use marline_scrub::decoder::{Decoder, GdeltaDecoder, ZdeltaDecoder};
+use marline_scrub::encoder::{ddelta_diff, gdelta_diff, xdelta_diff, zdelta_diff};
+use marline_sketcher::AronovichHash;
 
 pub trait PalantirCodec {
     fn encode(&self, new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8>;
@@ -16,11 +17,15 @@ pub struct XdeltaCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DdeltaCodec;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ZdeltaCodec;
+
 #[derive(Clone, Copy, Debug)]
 pub enum AnyCodec {
     Gdelta(GdeltaCodec),
     Xdelta(XdeltaCodec),
     Ddelta(DdeltaCodec),
+    Zdelta(ZdeltaCodec),
 }
 
 fn insert_instruction(data: &[u8]) -> Vec<u8> {
@@ -78,12 +83,27 @@ impl PalantirCodec for DdeltaCodec {
     }
 }
 
+impl PalantirCodec for ZdeltaCodec {
+    fn encode(&self, new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
+        zdelta_diff::<AronovichHash>(new_chunk, base_chunk)
+    }
+
+    fn decode(&self, base_chunk: &[u8], delta: &[u8]) -> Vec<u8> {
+        ZdeltaDecoder::new(false).decode_chunk(base_chunk.to_vec(), delta)
+    }
+
+    fn name(&self) -> &'static str {
+        "zdelta"
+    }
+}
+
 impl PalantirCodec for AnyCodec {
     fn encode(&self, new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
         match self {
             Self::Gdelta(codec) => codec.encode(new_chunk, base_chunk),
             Self::Xdelta(codec) => codec.encode(new_chunk, base_chunk),
             Self::Ddelta(codec) => codec.encode(new_chunk, base_chunk),
+            Self::Zdelta(codec) => codec.encode(new_chunk, base_chunk),
         }
     }
 
@@ -92,6 +112,7 @@ impl PalantirCodec for AnyCodec {
             Self::Gdelta(codec) => codec.decode(base_chunk, delta),
             Self::Xdelta(codec) => codec.decode(base_chunk, delta),
             Self::Ddelta(codec) => codec.decode(base_chunk, delta),
+            Self::Zdelta(codec) => codec.decode(base_chunk, delta),
         }
     }
 
@@ -100,6 +121,7 @@ impl PalantirCodec for AnyCodec {
             Self::Gdelta(codec) => codec.name(),
             Self::Xdelta(codec) => codec.name(),
             Self::Ddelta(codec) => codec.name(),
+            Self::Zdelta(codec) => codec.name(),
         }
     }
 }

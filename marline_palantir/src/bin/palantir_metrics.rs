@@ -13,7 +13,7 @@ use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, FileSystem, Scrub, ScrubMeasurements};
 use clap::{Parser, ValueEnum};
 use marline_index::heuristic_index::SearchConfig;
-use marline_palantir::codec::{AnyCodec, DdeltaCodec, GdeltaCodec, XdeltaCodec};
+use marline_palantir::codec::{AnyCodec, DdeltaCodec, GdeltaCodec, XdeltaCodec, ZdeltaCodec};
 use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
 use marline_palantir::mock_rocksdb::MockRocksDBMap;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
@@ -57,6 +57,7 @@ enum CodecKind {
     Gdelta,
     Xdelta,
     Ddelta,
+    Zdelta,
 }
 
 impl CodecKind {
@@ -65,6 +66,7 @@ impl CodecKind {
             Self::Gdelta => AnyCodec::Gdelta(GdeltaCodec),
             Self::Xdelta => AnyCodec::Xdelta(XdeltaCodec),
             Self::Ddelta => AnyCodec::Ddelta(DdeltaCodec),
+            Self::Zdelta => AnyCodec::Zdelta(ZdeltaCodec),
         }
     }
 
@@ -73,6 +75,7 @@ impl CodecKind {
             Self::Gdelta => "gdelta",
             Self::Xdelta => "xdelta",
             Self::Ddelta => "ddelta",
+            Self::Zdelta => "zdelta",
         }
     }
 }

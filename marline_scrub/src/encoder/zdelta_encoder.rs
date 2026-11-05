@@ -8,7 +8,7 @@ use crate::sbc_scrubber::ClusterPoint;
 use crate::SBCHash;
 use crate::{ChunkType, SBCKey, SBCMap};
 use bit_vec::BitVec;
-use chunkfs::{Data, Database};
+use chunkfs::{Data, Database, IterableDatabase};
 use huffman_compress::{Book, CodeBuilder, Tree};
 use std::cmp::min;
 use std::collections::HashMap;
@@ -32,6 +32,34 @@ type Triplet = [u8; 3];
 /// - Optional Huffman encoding of the delta.
 pub struct ZdeltaEncoder {
     huffman_book: Option<Book<u8>>,
+}
+
+pub fn zdelta_diff<H: SBCHash>(target_data: &[u8], parent_data: &[u8]) -> Vec<u8> {
+    let encoder = ZdeltaEncoder::new(false);
+    let parent_hash = H::default();
+    let target_hash = parent_hash.next_hash();
+    let parent_key = SBCKey { hash: parent_hash.clone(), chunk_type: ChunkType::Simple };
+    let mut target_map = SBCMap::new(crate::decoder::ZdeltaDecoder::new(false));
+    let _ = target_map.insert(parent_key, parent_data.to_vec());
+    let parent_triplet_lookup_table = match build_triplet_lookup_table(parent_data) {
+        Ok(table) => table,
+        Err(_) => return target_data.iter().flat_map(|byte| [LITERAL_FLAG, *byte]).collect(),
+    };
+    let shared_map = Arc::new(Mutex::new(&mut target_map));
+    let _ = encoder.encode_delta_chunk(
+        shared_map.clone(),
+        target_data,
+        target_hash.clone(),
+        parent_data,
+        &parent_triplet_lookup_table,
+        parent_hash,
+    );
+    drop(shared_map);
+    let result = match target_map.iterator().find(|(key, _)| key.hash == target_hash) {
+        Some((_, delta)) => delta.clone(),
+        None => target_data.iter().flat_map(|byte| [LITERAL_FLAG, *byte]).collect(),
+    };
+    result
 }
 
 impl Default for ZdeltaEncoder {
@@ -257,6 +285,14 @@ impl ZdeltaEncoder {
                     continue;
                 }
 
+                self.encode_literal(
+                    target_data[position_in_target_data],
+                    &mut delta_code,
+                    &mut bit_vec_delta_code,
+                    &mut uncompressed_data,
+                );
+                position_in_target_data += 1;
+            } else {
                 self.encode_literal(
                     target_data[position_in_target_data],
                     &mut delta_code,
