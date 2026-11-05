@@ -181,11 +181,15 @@ impl StageAggregate {
 
 struct RecorderState {
     stages: [StageAggregate; STAGE_COUNT],
+    generation: Arc<()>,
 }
 
 impl Default for RecorderState {
     fn default() -> Self {
-        Self { stages: std::array::from_fn(|_| StageAggregate::default()) }
+        Self {
+            stages: std::array::from_fn(|_| StageAggregate::default()),
+            generation: Arc::new(()),
+        }
     }
 }
 
@@ -269,18 +273,22 @@ impl MetricsRecorder {
 
     /// Clear collected measurements without changing which stages are enabled.
     pub fn clear(&self) {
-        *self.0.state.lock().unwrap() = RecorderState::default();
+        let mut state = self.0.state.lock().unwrap();
+        state.stages = std::array::from_fn(|_| StageAggregate::default());
+        state.generation = Arc::new(());
     }
 
     /// Start a local aggregation batch. The batch merges its data on drop.
     pub fn batch(&self) -> MetricsBatch {
-        MetricsBatch { recorder: self.clone(), stages: Vec::new() }
+        let generation = Arc::clone(&self.0.state.lock().unwrap().generation);
+        MetricsBatch { recorder: self.clone(), generation, stages: Vec::new() }
     }
 }
 
 /// Per-run accumulator. Samples are kept locally and merged under one lock on drop.
 pub struct MetricsBatch {
     recorder: MetricsRecorder,
+    generation: Arc<()>,
     // Allocate a stage histogram only on the first recorded sample for that stage.
     // This keeps an attached-but-disabled recorder cheap as well.
     stages: Vec<(Stage, StageAggregate)>,
@@ -324,6 +332,9 @@ impl Drop for MetricsBatch {
             return;
         }
         let mut state = self.recorder.0.state.lock().unwrap();
+        if !Arc::ptr_eq(&state.generation, &self.generation) {
+            return;
+        }
         for (stage, source) in &self.stages {
             state.stages[stage.index()].merge(source);
         }
@@ -438,5 +449,17 @@ mod tests {
         let snapshot = recorder.snapshot();
         assert_eq!(snapshot.stages[0].stage, Stage::Cdc);
         assert_eq!(snapshot.stages[0].count, 1);
+    }
+
+    #[test]
+    fn clear_discards_samples_from_batches_started_before_clear() {
+        let recorder = MetricsRecorder::enabled_all();
+        let mut batch = recorder.batch();
+        batch.record(Stage::Cdc, Duration::from_nanos(42));
+
+        recorder.clear();
+        drop(batch);
+
+        assert!(recorder.snapshot().stages.is_empty());
     }
 }

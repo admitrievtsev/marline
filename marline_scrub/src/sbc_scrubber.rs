@@ -7,6 +7,7 @@ use marline_sketcher::SBCHasher;
 use chunkfs::{
     ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
 };
+#[cfg(feature = "runtime-metrics")]
 use marline_metrics::{MetricsRecorder, Stage};
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
@@ -260,6 +261,7 @@ where
     encoder: E,
 
     /// Optional runtime latency recorder.
+    #[cfg(feature = "runtime-metrics")]
     metrics: Option<MetricsRecorder>,
 }
 
@@ -282,10 +284,17 @@ where
     ///
     /// A new `SBCScrubber` ready to process chunks.
     pub fn new(hasher: H, clusterer: C, encoder: E) -> Self {
-        SBCScrubber { hasher, clusterer, encoder, metrics: None }
+        SBCScrubber {
+            hasher,
+            clusterer,
+            encoder,
+            #[cfg(feature = "runtime-metrics")]
+            metrics: None,
+        }
     }
 
     /// Attach an opt-in runtime metrics recorder to this scrubber.
+    #[cfg(feature = "runtime-metrics")]
     pub fn with_metrics(mut self, recorder: MetricsRecorder) -> Self {
         self.metrics = Some(recorder);
         self
@@ -334,13 +343,17 @@ where
         let sbc_hash_chunk: Mutex<Vec<_>> = Mutex::default();
 
         let total_start = Instant::now();
+        #[cfg(feature = "runtime-metrics")]
         let total_enabled =
             self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcScrubTotal));
+        #[cfg(feature = "runtime-metrics")]
         let mut metrics_batch = self.metrics.as_ref().map(MetricsRecorder::batch);
 
         // 1. Hashing: compute similarity hashes in parallel
+        #[cfg(feature = "runtime-metrics")]
         let hashing_enabled =
             self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcHashing));
+        #[cfg(feature = "runtime-metrics")]
         let hashing_start = hashing_enabled.then(Instant::now);
         pool.install(|| {
             mut_refs_database.par_iter_mut().for_each(|data_container| {
@@ -357,6 +370,7 @@ where
                 }
             });
         });
+        #[cfg(feature = "runtime-metrics")]
         if hashing_enabled {
             if let Some(batch) = metrics_batch.as_mut() {
                 batch.record_unconditionally(Stage::SbcHashing, hashing_start.unwrap().elapsed());
@@ -364,11 +378,14 @@ where
         }
 
         // 2. Clustering: group chunks by similarity
+        #[cfg(feature = "runtime-metrics")]
         let cluster_enabled =
             self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcClustering));
+        #[cfg(feature = "runtime-metrics")]
         let cluster_start = cluster_enabled.then(Instant::now);
         let (mut clusters, clusterization_report) =
             self.clusterer.clusterize(sbc_hash_chunk.into_inner().unwrap());
+        #[cfg(feature = "runtime-metrics")]
         if cluster_enabled {
             if let Some(batch) = metrics_batch.as_mut() {
                 batch
@@ -377,10 +394,13 @@ where
         }
 
         // 3. Encoding: encode clusters and store in target map
+        #[cfg(feature = "runtime-metrics")]
         let encode_enabled =
             self.metrics.as_ref().is_some_and(|recorder| recorder.is_enabled(Stage::SbcEncoding));
+        #[cfg(feature = "runtime-metrics")]
         let encode_start = encode_enabled.then(Instant::now);
         let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
+        #[cfg(feature = "runtime-metrics")]
         if encode_enabled {
             if let Some(batch) = metrics_batch.as_mut() {
                 batch.record_unconditionally(Stage::SbcEncoding, encode_start.unwrap().elapsed());
@@ -388,6 +408,7 @@ where
         }
 
         let running_time = total_start.elapsed();
+        #[cfg(feature = "runtime-metrics")]
         if total_enabled {
             if let Some(batch) = metrics_batch.as_mut() {
                 batch.record_unconditionally(Stage::SbcScrubTotal, running_time);
@@ -395,6 +416,7 @@ where
         }
 
         // Merge per-scrub measurements before returning the result.
+        #[cfg(feature = "runtime-metrics")]
         drop(metrics_batch);
 
         Ok(ScrubMeasurements {
