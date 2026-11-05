@@ -21,7 +21,7 @@ marline_scrub = { path = "../marline_scrub", features = ["runtime-metrics"] }
 marline_metrics = { path = "../marline_metrics" }
 ```
 
-Если приложение должно уметь компилироваться как с instrumentation, так и без неё, сделайте обе зависимости optional и прокиньте feature явно. У `marline_scrub` `runtime-metrics` выключен по умолчанию:
+Если приложение должно собираться и с instrumentation, и без неё, оставьте `marline_scrub` обязательной зависимостью, отключите её default features и подключайте метрики отдельным feature. У `marline_scrub` `runtime-metrics` выключен по умолчанию:
 
 ```toml
 [dependencies]
@@ -33,14 +33,7 @@ default = []
 runtime-metrics = ["dep:marline_metrics", "marline_scrub/runtime-metrics"]
 ```
 
-Когда код использует API метрик, оградите его тем же feature приложения, чтобы он собирался при выключенном instrumentation:
-
-```toml
-[features]
-runtime-metrics = ["dep:marline_metrics", "marline_scrub/runtime-metrics"]
-```
-
-Например, workspace-бинарник `marline` включает этот feature по умолчанию, но позволяет выключить его через `--no-default-features`. Не включайте default features зависимости безусловно, если нужно, чтобы отключение feature в приложении действительно исключало instrumentation.
+Код приложения, использующий `MetricsRecorder` или `SBCScrubber::with_metrics`, также нужно оградить `#[cfg(feature = "runtime-metrics")]`, иначе он не соберётся при отключённом feature. Например, workspace-бинарник `marline` включает этот feature по умолчанию, но позволяет выключить его через `--no-default-features`.
 
 ## 2. Добавить стадию
 
