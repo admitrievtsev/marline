@@ -1,10 +1,17 @@
+//! Run `palantir_metrics --help` for available command-line options.
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+#[path = "support/args.rs"]
+mod args;
+
+use args::{add_data_dir_arg, data_dir};
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{DataContainer, FileSystem};
+use clap::Command;
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
@@ -180,20 +187,13 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
     );
 }
 
-fn ensure_datasets() -> Vec<std::path::PathBuf> {
+fn ensure_datasets(base: &Path) -> Vec<std::path::PathBuf> {
     const KERNEL_VERSIONS: [&str; 5] =
         //   ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7", "linux-3.4.8", "linux-3.4.9"];
         //       ["linux-3.4.5", "linux-3.5.6", "linux-3.6.7", "linux-3.7.8", "linux-3.8.9"];
         ["linux-3.4.5", "linux-3.6.6", "linux-3.8.7", "linux-3.10.8", "linux-3.12.9"];
 
-    let base = match std::env::var_os("MARLINE_DATA_DIR") {
-        Some(v) => std::path::PathBuf::from(v),
-        None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            std::path::PathBuf::from(home).join(".marline")
-        }
-    };
-    std::fs::create_dir_all(&base).expect("failed to create data directory");
+    std::fs::create_dir_all(base).expect("failed to create data directory");
 
     let mut ready = Vec::new();
     for &version in &KERNEL_VERSIONS {
@@ -212,7 +212,7 @@ fn ensure_datasets() -> Vec<std::path::PathBuf> {
 
         if needs_dl {
             eprintln!("Kernel dataset {} not found – downloading …", version);
-            download_kernel(version, &base);
+            download_kernel(version, base);
         }
         ready.push(dir);
     }
@@ -267,7 +267,13 @@ fn download_kernel(version: &str, base: &std::path::Path) {
 }
 
 fn main() {
-    let kernel_dirs = ensure_datasets();
+    let matches = add_data_dir_arg(
+        Command::new("palantir_metrics")
+            .about("Run Palantir metrics across configured Linux kernel datasets"),
+    )
+    .get_matches();
+    let base = data_dir(&matches);
+    let kernel_dirs = ensure_datasets(&base);
 
     let mut kernel_files: Vec<Vec<Vec<u8>>> = Vec::new();
     for dir in &kernel_dirs {

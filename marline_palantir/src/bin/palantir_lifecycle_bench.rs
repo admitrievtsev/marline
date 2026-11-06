@@ -5,22 +5,20 @@
 //! The benchmark streams every kernel version, in chronological order, into a
 //! single [`PalantirOnline`] instance.  [`PalantirOnline::write`] closes a
 //! backup version (calling [`PalantirOnline::finish_version`]) after every
-//! `CHUNKS_PER_VERSION` chunks written, so versions are cut on chunk
+//! `chunks_per_version` chunks written, so versions are cut on chunk
 //! boundaries at roughly the requested amount of data.  The final, partial
 //! version is closed explicitly after the last kernel.
 //!
-//! Environment variables:
-//! * `MARLINE_DATA_DIR` — directory holding the extracted kernels
-//!   (default `~/.marline`).
-//! * `MAX_VERSIONS` — limit the number of kernel versions (default: all).
-//! * `CHUNKS_PER_VERSION` — chunks written before a new version starts
-//!   (default `DEFAULT_CHUNKS_PER_VERSION`, roughly 2 GiB).
-//! * `RUNS` — repetition count (default 1).
-//! * `OUT` — path for the CSV report (default stdout).
+//! Run `palantir_lifecycle_bench --help` for available command-line options.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+#[path = "support/args.rs"]
+mod args;
+
+use args::{add_benchmark_args, data_dir, output};
+use clap::{error::ErrorKind, value_parser, Arg, Command};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
@@ -74,6 +72,35 @@ const KERNEL_VERSIONS: [&str; 38] = [
     "linux-3.19.8",
 ];
 
+fn cli() -> clap::ArgMatches {
+    add_benchmark_args(
+        Command::new("palantir_lifecycle_bench")
+            .about("Benchmark lifecycle-aware Palantir backups of Linux kernel versions")
+            .arg(
+                Arg::new("max-versions")
+                    .long("max-versions")
+                    .value_name("COUNT")
+                    .help("Limit the number of chronological kernel versions processed (default: all)")
+                    .value_parser(value_parser!(usize)),
+            )
+            .arg(
+                Arg::new("runs")
+                    .long("runs")
+                    .value_name("COUNT")
+                    .help("Number of benchmark repetitions (default: 1)")
+                    .value_parser(value_parser!(usize)),
+            )
+            .arg(
+                Arg::new("chunks-per-version")
+                    .long("chunks-per-version")
+                    .value_name("COUNT")
+                    .help("Number of chunks written before the next backup version starts (default: 1500)")
+                    .value_parser(value_parser!(usize)),
+            ),
+    )
+    .get_matches()
+}
+
 fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
@@ -100,15 +127,6 @@ fn load_kernel(dir: &Path) -> Vec<u8> {
         }
     }
     all
-}
-
-fn data_base() -> PathBuf {
-    match std::env::var_os("MARLINE_DATA_DIR") {
-        Some(v) => PathBuf::from(v),
-        None => {
-            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".marline")
-        }
-    }
 }
 
 /// Ensures every kernel version in `versions` is extracted under `base`,
@@ -182,23 +200,33 @@ fn download_kernel(version: &str, base: &Path) {
 }
 
 fn main() {
-    let base = data_base();
-
-    let max_versions = std::env::var("MAX_VERSIONS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(KERNEL_VERSIONS.len())
-        .min(KERNEL_VERSIONS.len());
-    let runs: usize = std::env::var("RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
-    let chunks_per_version: usize = std::env::var("CHUNKS_PER_VERSION")
-        .ok()
-        .and_then(|v| v.parse().ok())
+    let matches = cli();
+    let base = data_dir(&matches);
+    let max_versions =
+        matches.get_one::<usize>("max-versions").copied().unwrap_or(KERNEL_VERSIONS.len());
+    let runs = matches.get_one::<usize>("runs").copied().unwrap_or(1);
+    let chunks_per_version = matches
+        .get_one::<usize>("chunks-per-version")
+        .copied()
         .unwrap_or(DEFAULT_CHUNKS_PER_VERSION);
-    let out = std::env::var_os("OUT").map(PathBuf::from);
+    let out = output(&matches);
 
-    if max_versions == 0 {
-        eprintln!("no kernel versions to process (MAX_VERSIONS=0)");
-        return;
+    if !(1..=KERNEL_VERSIONS.len()).contains(&max_versions) {
+        clap::Error::raw(
+            ErrorKind::ValueValidation,
+            format!("--max-versions must be between 1 and {}", KERNEL_VERSIONS.len()),
+        )
+        .exit();
+    }
+    if runs == 0 {
+        clap::Error::raw(ErrorKind::ValueValidation, "--runs must be greater than zero").exit();
+    }
+    if chunks_per_version == 0 {
+        clap::Error::raw(
+            ErrorKind::ValueValidation,
+            "--chunks-per-version must be greater than zero",
+        )
+        .exit();
     }
     let versions = &KERNEL_VERSIONS[..max_versions];
     let dirs = ensure_datasets(&base, versions);
@@ -266,43 +294,43 @@ fn main() {
             "cum_sf_posts"
         );
         for report in online.version_reports() {
-            let bytes_mib = report.bytes as f64 / (1024.0 * 1024.0);
-            let stored_mib = report.stored_bytes as f64 / (1024.0 * 1024.0);
-            let dedup = if report.stored_bytes > 0 {
-                report.bytes as f64 / report.stored_bytes as f64
+            let bytes_mib = report.bytes() as f64 / (1024.0 * 1024.0);
+            let stored_mib = report.stored_bytes() as f64 / (1024.0 * 1024.0);
+            let dedup = if report.stored_bytes() > 0 {
+                report.bytes() as f64 / report.stored_bytes() as f64
             } else {
                 0.0
             };
-            let finish_s = report.finish_duration.as_secs_f64();
+            let finish_s = report.finish_duration().as_secs_f64();
             println!(
                 "{:<8} {:<6} {:<9} {:<10.2} {:<10.2} {:<10.4} {:<12.3} {:<10.3} {:<4} {:<4} {:<4} {:<9}",
                 run,
-                report.index,
-                report.chunks,
+                report.index(),
+                report.chunks(),
                 bytes_mib,
                 stored_mib,
                 dedup,
-                report.duration.as_secs_f64(),
+                report.duration().as_secs_f64(),
                 finish_s,
-                report.evicted[0],
-                report.evicted[1],
-                report.evicted[2],
+                report.evicted()[0],
+                report.evicted()[1],
+                report.evicted()[2],
                 online.sf_table_size(),
             );
             csv.push_str(&format!(
                 "{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{}\n",
                 CONFIG_NAME,
                 run,
-                report.index,
-                report.chunks,
+                report.index(),
+                report.chunks(),
                 bytes_mib,
                 stored_mib,
                 dedup,
-                report.duration.as_secs_f64(),
+                report.duration().as_secs_f64(),
                 finish_s,
-                report.evicted[0],
-                report.evicted[1],
-                report.evicted[2],
+                report.evicted()[0],
+                report.evicted()[1],
+                report.evicted()[2],
             ));
         }
 

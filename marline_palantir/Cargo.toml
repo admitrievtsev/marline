@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+clap = "4.6.7"
 sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true

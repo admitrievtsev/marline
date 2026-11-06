@@ -27,24 +27,61 @@ pub const DEFAULT_CHUNKS_PER_VERSION: usize = 1500;
 #[derive(Clone, Debug)]
 pub struct VersionReport<const N: usize> {
     /// Zero-based index of the version.
-    pub index: usize,
+    index: usize,
     /// Number of chunks written in this version.
-    pub chunks: u64,
+    chunks: u64,
     /// Number of input bytes written in this version.
-    pub bytes: u64,
+    bytes: u64,
     /// Payload bytes stored in this version (increase of `bytes_stored`
     /// across the version).
-    pub stored_bytes: u64,
+    stored_bytes: u64,
     /// Number of super-feature entries evicted per tier at the end of the
     /// version.
-    pub evicted: [usize; N],
+    evicted: [usize; N],
     /// Wall-clock time from the start of the version to the end of its
     /// `finish_version` call.
-    pub duration: std::time::Duration,
+    duration: std::time::Duration,
     /// Wall-clock time spent inside this version's `finish_version` call
     /// (lifecycle metric update + eviction). The pure `write` time for the
     /// version is `duration - finish_duration`.
-    pub finish_duration: std::time::Duration,
+    finish_duration: std::time::Duration,
+}
+
+impl<const N: usize> VersionReport<N> {
+    /// Zero-based index of the version.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Number of chunks written in this version.
+    pub fn chunks(&self) -> u64 {
+        self.chunks
+    }
+
+    /// Number of input bytes written in this version.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// Payload bytes stored in this version.
+    pub fn stored_bytes(&self) -> u64 {
+        self.stored_bytes
+    }
+
+    /// Number of super-feature entries evicted per tier at the end of the version.
+    pub fn evicted(&self) -> &[usize; N] {
+        &self.evicted
+    }
+
+    /// Wall-clock time from the start of the version to the end of its `finish_version` call.
+    pub fn duration(&self) -> std::time::Duration {
+        self.duration
+    }
+
+    /// Wall-clock time spent inside this version's `finish_version` call.
+    pub fn finish_duration(&self) -> std::time::Duration {
+        self.finish_duration
+    }
 }
 
 pub trait OnlineSBC<
