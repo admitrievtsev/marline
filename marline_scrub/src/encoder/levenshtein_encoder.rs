@@ -87,17 +87,16 @@ impl Encoder for LevenshteinEncoder {
             if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
                 continue;
             }
-            let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
-                    if data.len().abs_diff(parent_chunk.parent_data.len()) > 4000 {
+                    let sbc_hash = if data.len().abs_diff(parent_chunk.parent_data.len()) > 4000 {
                         let (left, sbc_hash) = encode_simple_chunk(
                             &mut target_map.clone().lock().unwrap(),
                             data,
                             hash.clone(),
                         );
                         data_left += left;
-                        target_hash = sbc_hash;
+                        sbc_hash
                     } else {
                         let (left, processed, sbc_hash) = self.encode_delta_chunk(
                             target_map.clone(),
@@ -108,12 +107,12 @@ impl Encoder for LevenshteinEncoder {
                         );
                         data_left += left;
                         processed_data += processed;
-                        target_hash = sbc_hash;
-                    }
+                        sbc_hash
+                    };
+                    data_container.make_target(vec![sbc_hash]);
                 }
                 Data::TargetChunk(_) => {}
             }
-            data_container.make_target(vec![target_hash]);
         }
         (data_left, processed_data)
     }

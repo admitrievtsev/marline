@@ -352,12 +352,6 @@ impl SpeedSketchHash {
     }
 }
 
-impl Default for SpeedSketchHash {
-    fn default() -> Self {
-        Self::from_sketch(0, default_config().id())
-    }
-}
-
 impl hash::Hash for SpeedSketchHash {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         // Chunks are compared and looked up by feature, not by the whole sketch.

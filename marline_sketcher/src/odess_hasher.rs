@@ -75,7 +75,7 @@ pub enum IndexType {
     RawFeatured(usize),
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct OdessHash {
     hash: Vec<u64>,
 }

@@ -132,7 +132,6 @@ impl Encoder for XdeltaEncoder {
             if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
                 continue;
             }
-            let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let (left, processed, sbc_hash) = self.encode_delta_chunk(
@@ -145,11 +144,10 @@ impl Encoder for XdeltaEncoder {
                     );
                     data_left += left;
                     processed_data += processed;
-                    target_hash = sbc_hash;
+                    data_container.make_target(vec![sbc_hash]);
                 }
                 Data::TargetChunk(_) => {}
             }
-            data_container.make_target(vec![target_hash]);
         }
         (data_left, processed_data)
     }

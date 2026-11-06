@@ -17,7 +17,7 @@ mod sbc_scrubber;
 /// # Type Parameters
 ///
 /// * `Hash` - A type that implements the `SBCHash` trait, representing the hash of the parent chunk.
-#[derive(Hash, PartialEq, Eq, Clone, Default, Debug)]
+#[derive(Hash, PartialEq, Eq, Clone, Debug)]
 enum ChunkType<Hash: SBCHash> {
     /// The chunk is stored as a delta relative to a parent chunk.
     Delta {
@@ -27,7 +27,6 @@ enum ChunkType<Hash: SBCHash> {
         number: u16,
     },
     /// The chunk is stored in full (non-delta).
-    #[default]
     Simple,
 }
 
@@ -43,7 +42,7 @@ enum ChunkType<Hash: SBCHash> {
 ///
 /// * `hash` - The hash of the chunk's content.
 /// * `chunk_type` - The type of the chunk, indicating whether it is stored as a full chunk or as a delta.
-#[derive(Hash, PartialEq, Eq, Clone, Default)]
+#[derive(Hash, PartialEq, Eq, Clone)]
 pub struct SBCKey<H: SBCHash> {
     /// The hash identifying the chunk content.
     hash: H,
