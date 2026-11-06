@@ -431,7 +431,11 @@ mod tests {
 
     /// Mirrors the base chunk state `encode_cluster` builds, so `delta_code` can be exercised
     /// directly without a `DataContainer` cluster.
-    fn build_base(data: &[u8], sbc_hash: SpeedSketchHash) -> BaseChunk<'_, SpeedSketchHash> {
+    fn build_base<'a>(
+        data: &'a [u8],
+        sbc_hash: SpeedSketchHash,
+        config: &SpeedSketchConfig,
+    ) -> BaseChunk<'a, SpeedSketchHash> {
         let word_size = speedsketch::WORD_SIZE;
         let move_bts = 64 / word_size;
         let mask_bts = ((data.len() as f64).log2() as usize).max(1);
@@ -445,7 +449,7 @@ mod tests {
         for i in 0..base_words {
             fp = (fp << move_bts).wrapping_add(gear(data[i + word_size - 1]));
             word_hash_offsets.insert(fp >> (64 - mask_bts), i);
-            if speedsketch::is_proxy(fp) {
+            if speedsketch::is_proxy_with(fp, config.masks()) {
                 sketch |= 1u64 << speedsketch::class_of(fp);
             }
         }
@@ -453,8 +457,9 @@ mod tests {
     }
 
     fn encode(base: &[u8], new: &[u8]) -> Vec<u8> {
-        let base_chunk = build_base(base, SpeedSketchHash::new_with_u32(0));
-        GdeltaEncoder::delta_code(new, &base_chunk, speedsketch::sketch(new))
+        let config = SpeedSketchConfig::default();
+        let base_chunk = build_base(base, SpeedSketchHash::new_with_u32(0), &config);
+        GdeltaEncoder::delta_code(new, &base_chunk, speedsketch::sketch_with(new, config.masks()))
     }
 
     fn decode(base: &[u8], delta: &[u8]) -> Vec<u8> {
@@ -561,11 +566,12 @@ mod tests {
         assert_ne!(stored_key.hash, requested_parent_hash, "an occupied key must be shifted");
         assert_eq!(stored_key.hash, requested_parent_hash.next_hash());
 
-        let base = build_base(parent.as_slice(), stored_key.hash.clone());
+        let config = SpeedSketchConfig::default();
+        let base = build_base(parent.as_slice(), stored_key.hash.clone(), &config);
         let delta = GdeltaEncoder::delta_code(
             child.as_slice(),
             &base,
-            speedsketch::sketch(child.as_slice()),
+            speedsketch::sketch_with(child.as_slice(), config.masks()),
         );
 
         let child_key = SBCKey {
