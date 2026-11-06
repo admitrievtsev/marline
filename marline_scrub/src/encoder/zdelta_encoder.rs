@@ -73,7 +73,6 @@ impl Encoder for ZdeltaEncoder {
             if parent_info.index > -1 && chunk_id == parent_info.index as usize {
                 continue;
             }
-            let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let (left, processed, sbc_hash) = self.encode_delta_chunk(
@@ -86,11 +85,10 @@ impl Encoder for ZdeltaEncoder {
                     );
                     data_left += left;
                     total_processed_bytes += processed;
-                    target_hash = sbc_hash;
+                    data_container.make_target(vec![sbc_hash]);
                 }
                 Data::TargetChunk(_) => {}
             }
-            data_container.make_target(vec![target_hash]);
         }
         (data_left, total_processed_bytes)
     }

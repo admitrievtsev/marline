@@ -8,7 +8,7 @@ pub mod odess_hasher;
 pub mod speedsketch;
 
 /// Defines core hash functionality for Similarity-Based Chunking (SBC).
-pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
+pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Send + Sync {
     /// Creates a new hash instance from a 32-bit unsigned integer key.
     fn new_with_u32(key: u32) -> Self;
 
