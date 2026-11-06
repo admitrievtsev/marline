@@ -12,7 +12,6 @@
 use crate::{GEAR, SBCHash, SBCHasher};
 use std::fmt;
 use std::hash;
-use std::sync::OnceLock;
 
 /// Size of the word whose fingerprint is computed, in bytes.
 ///
@@ -193,17 +192,9 @@ impl SpeedSketchConfig {
 
 impl Default for SpeedSketchConfig {
     fn default() -> Self {
-        default_config().clone()
-    }
-}
-
-/// Returns the process-wide default configuration, generating its masks only once.
-fn default_config() -> &'static SpeedSketchConfig {
-    static DEFAULT: OnceLock<SpeedSketchConfig> = OnceLock::new();
-    DEFAULT.get_or_init(|| {
         SpeedSketchConfig::new(DEFAULT_FEATURE_POPCOUNT, DEFAULT_BLOOM_POPCOUNT, DEFAULT_MASK_SEED)
             .expect("default SpeedSketch configuration is valid")
-    })
+    }
 }
 
 fn validate_popcount(popcount: u32) -> Result<(), MaskError> {
@@ -259,29 +250,18 @@ pub fn class_of(fp: u64) -> u32 {
     (fp & CLASS_MASK) as u32
 }
 
-/// Reports whether a fingerprint is a proxy of its class, that is whether all bits
-/// selected by the mask of the class are zero.
-#[inline(always)]
-pub fn is_proxy(fp: u64) -> bool {
-    is_proxy_with(fp, default_config().masks())
-}
-
-/// Reports whether a fingerprint is a proxy under the given mask set.
+/// Reports whether a fingerprint is a proxy of its class under the given mask set, that is
+/// whether all bits selected by the mask of the class are zero.
 #[inline(always)]
 pub fn is_proxy_with(fp: u64, masks: &MaskSet) -> bool {
     fp & masks.masks()[class_of(fp) as usize] == 0
 }
 
-/// Computes the sketch of a chunk with the default masks.
+/// Computes the sketch of a chunk with the given mask set.
 ///
 /// Every word of `data` contributes at most one bit: the bit of its class, and only when the
 /// word's fingerprint is a proxy. Chunks shorter than a word have no fingerprint and yield an
 /// empty sketch.
-pub fn sketch(data: &[u8]) -> u64 {
-    sketch_with(data, default_config().masks())
-}
-
-/// Computes the sketch of a chunk with the given mask set.
 pub fn sketch_with(data: &[u8], masks: &MaskSet) -> u64 {
     sketch_in(data, masks.masks())
 }
@@ -342,12 +322,14 @@ pub struct SpeedSketchHash {
     sketch: u64,
     /// Last 32 bits of the sketch, used as the similarity feature.
     feature: [u64; 1],
-    /// Identifier of the mask configuration that produced the sketch.
-    config_id: u64,
+    /// Identifier of the mask configuration that produced the sketch, when known.
+    ///
+    /// A hash built from a bare key via [`SBCHash::new_with_u32`] carries no configuration.
+    config_id: Option<u64>,
 }
 
 impl SpeedSketchHash {
-    fn from_sketch(sketch: u64, config_id: u64) -> Self {
+    fn from_sketch(sketch: u64, config_id: Option<u64>) -> Self {
         SpeedSketchHash { sketch, feature: [feature_of(sketch) as u64], config_id }
     }
 }
@@ -370,7 +352,9 @@ impl Eq for SpeedSketchHash {}
 
 impl SBCHash for SpeedSketchHash {
     fn new_with_u32(key: u32) -> Self {
-        SpeedSketchHash::from_sketch(key as u64, default_config().id())
+        // The key alone says nothing about the mask configuration, so the resulting hash is
+        // only suitable as a lookup key. Use `new_with_u32_like` to keep the configuration.
+        SpeedSketchHash::from_sketch(key as u64, None)
     }
 
     fn new_with_u32_like(&self, key: u32) -> Self {
@@ -408,22 +392,17 @@ impl SBCHash for SpeedSketchHash {
     }
 
     fn sketch_config_id(&self) -> Option<u64> {
-        Some(self.config_id)
+        self.config_id
     }
 }
 
-/// Generates the sketch of a chunk, see [`sketch`].
-#[derive(Default, Debug, Clone)]
+/// Generates the sketch of a chunk, see [`sketch_with`].
+#[derive(Debug, Clone)]
 pub struct SpeedSketchHasher {
     config: SpeedSketchConfig,
 }
 
 impl SpeedSketchHasher {
-    /// Creates a hasher with the default mask configuration.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Creates a hasher with the given mask configuration.
     pub fn with_config(config: SpeedSketchConfig) -> Self {
         SpeedSketchHasher { config }
@@ -439,7 +418,10 @@ impl SBCHasher for SpeedSketchHasher {
     type Hash = SpeedSketchHash;
 
     fn calculate_hash(&self, chunk_data: &[u8]) -> SpeedSketchHash {
-        SpeedSketchHash::from_sketch(sketch_with(chunk_data, self.config.masks()), self.config.id())
+        SpeedSketchHash::from_sketch(
+            sketch_with(chunk_data, self.config.masks()),
+            Some(self.config.id()),
+        )
     }
 }
 
@@ -474,11 +456,6 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_cached() {
-        assert!(std::ptr::eq(default_config(), default_config()));
-    }
-
-    #[test]
     fn uniform_masks_have_exact_popcount_and_are_deterministic() {
         for popcount in [1, 4, 8, 16, AVAILABLE_MASK_BITS] {
             let first = SpeedSketchConfig::uniform(popcount, 42).unwrap();
@@ -506,7 +483,8 @@ mod tests {
     #[test]
     fn hashes_with_different_configs_are_not_equal() {
         let data = pattern(4096);
-        let default = SpeedSketchHasher::new().calculate_hash(&data);
+        let default =
+            SpeedSketchHasher::with_config(SpeedSketchConfig::default()).calculate_hash(&data);
         let other = SpeedSketchHasher::with_config(SpeedSketchConfig::uniform(8, 1).unwrap())
             .calculate_hash(&data);
         assert_ne!(default, other);
@@ -518,8 +496,17 @@ mod tests {
         let config = SpeedSketchConfig::uniform(7, 99).unwrap();
         let hash = SpeedSketchHasher::with_config(config.clone()).calculate_hash(&pattern(64));
         let rekeyed = hash.new_with_u32_like(42);
-        assert_eq!(rekeyed.config_id, config.id());
+        assert_eq!(rekeyed.config_id, Some(config.id()));
         assert_eq!(rekeyed.get_key_for_graph_clusterer(), 42);
+    }
+
+    #[test]
+    fn bare_key_hashes_carry_no_configuration() {
+        let hash = SpeedSketchHash::new_with_u32(7);
+        assert_eq!(hash.sketch_config_id(), None);
+        assert_eq!(hash.next_hash().sketch_config_id(), None);
+        assert_eq!(hash.last_hash().sketch_config_id(), None);
+        assert_eq!(hash.new_with_u32_like(8).sketch_config_id(), None);
     }
 
     fn pattern(len: usize) -> Vec<u8> {
@@ -528,44 +515,53 @@ mod tests {
 
     #[test]
     fn sketch_of_empty_and_subword_chunks_is_zero() {
-        assert_eq!(sketch(&[]), 0);
-        assert_eq!(sketch(&[0u8; WORD_SIZE - 1]), 0);
+        let config = SpeedSketchConfig::default();
+        assert_eq!(sketch_with(&[], config.masks()), 0);
+        assert_eq!(sketch_with(&[0u8; WORD_SIZE - 1], config.masks()), 0);
     }
 
     #[test]
     fn sketch_of_word_sized_chunk_is_single_word_contribution() {
+        let config = SpeedSketchConfig::default();
         let data = [42u8; WORD_SIZE];
         let mut fp = 0u64;
         for &byte in &data {
             fp = fp_step(fp, byte);
         }
-        let expected = if is_proxy(fp) { 1u64 << class_of(fp) } else { 0 };
-        assert_eq!(sketch(&data), expected);
+        let expected = if is_proxy_with(fp, config.masks()) { 1u64 << class_of(fp) } else { 0 };
+        assert_eq!(sketch_with(&data, config.masks()), expected);
     }
 
     #[test]
     fn sketch_is_deterministic() {
+        let config = SpeedSketchConfig::default();
         let data = pattern(4096);
-        assert_eq!(sketch(&data), sketch(&data.clone()));
+        assert_eq!(sketch_with(&data, config.masks()), sketch_with(&data.clone(), config.masks()));
     }
 
     #[test]
     fn sketch_of_identical_bytes_collapses_to_one_class() {
         // A constant chunk has the same fingerprint in every window, so the sketch can hold
         // at most the single class bit of that fingerprint.
+        let config = SpeedSketchConfig::default();
         for byte in [0u8, 1, 0x41, 0xff] {
             let data = vec![byte; 4096];
-            let s = sketch(&data);
+            let s = sketch_with(&data, config.masks());
             assert!(s == 0 || s.is_power_of_two(), "byte {byte:#x} produced {s:#018x}");
         }
     }
 
     #[test]
     fn single_byte_change_keeps_shared_class_bits() {
+        let config = SpeedSketchConfig::default();
         let base = pattern(4096);
         let mut changed = base.clone();
         changed[1234] ^= 0xff;
-        assert_ne!(sketch(&base) & sketch(&changed), 0, "similar chunks must share class bits");
+        assert_ne!(
+            sketch_with(&base, config.masks()) & sketch_with(&changed, config.masks()),
+            0,
+            "similar chunks must share class bits"
+        );
     }
 
     #[test]
