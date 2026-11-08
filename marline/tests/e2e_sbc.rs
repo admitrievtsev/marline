@@ -16,18 +16,19 @@ use marline_sketcher::{SpeedSketchHash, SpeedSketchHasher};
 use std::collections::HashMap;
 
 /// Concrete key type: CDC hash -> similarity key.
-type K = SBCKey<SpeedSketchHash>;
+type SketcherKey = SBCKey<SpeedSketchHash>;
 /// Deduplication DB: chunk hash -> container holding an SBC key.
-type B = HashMap<[u8; 32], DataContainer<K>>;
+type ChunkDb = HashMap<[u8; 32], DataContainer<SketcherKey>>;
 
-fn chunk_size() -> SizeParams {
-    SizeParams::new(16 * 1024, 32 * 1024, 64 * 1024)
-}
+/// Min/avg/max chunk sizes (bytes), mirroring `marline/src/main.rs`.
+const CHUNK_MIN: usize = 16 * 1024;
+const CHUNK_AVG: usize = 32 * 1024;
+const CHUNK_MAX: usize = 64 * 1024;
 
 /// Creates a filesystem with the same SBC pipeline as `marline/src/main.rs`.
-fn make_fs() -> FileSystem<B, [u8; 32], K, SBCMap<GdeltaDecoder, SpeedSketchHash>> {
+fn make_fs() -> FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder, SpeedSketchHash>> {
     FileSystem::new_with_scrubber(
-        B::new(),
+        ChunkDb::new(),
         SBCMap::new(GdeltaDecoder::new(false)),
         Box::new(SBCScrubber::new(
             SpeedSketchHasher::new(),
@@ -41,13 +42,17 @@ fn make_fs() -> FileSystem<B, [u8; 32], K, SBCMap<GdeltaDecoder, SpeedSketchHash
 /// Writes every corpus document as its own file, returning the originals so
 /// read-back can be verified per file.
 fn write_all(
-    fs: &mut FileSystem<B, [u8; 32], K, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
+    fs: &mut FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
     documents: &[Vec<u8>],
 ) -> Vec<Vec<u8>> {
     let origins: Vec<Vec<u8>> = documents.to_vec();
     for (i, doc) in documents.iter().enumerate() {
-        let mut handle =
-            fs.create_file(format!("file_{i}"), FastChunker::new(chunk_size())).unwrap();
+        let mut handle = fs
+            .create_file(
+                format!("file_{i}"),
+                FastChunker::new(SizeParams::new(CHUNK_MIN, CHUNK_AVG, CHUNK_MAX)),
+            )
+            .unwrap();
         fs.write_to_file(&mut handle, doc).unwrap();
         fs.close_file(handle).unwrap();
     }
@@ -56,7 +61,7 @@ fn write_all(
 
 /// Reads every file back fully, in increasing index order.
 fn read_all(
-    fs: &FileSystem<B, [u8; 32], K, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
+    fs: &FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
     count: usize,
 ) -> Vec<Vec<u8>> {
     (0..count)
@@ -98,14 +103,14 @@ fn full_corpus_survives_scrub_roundtrip() {
     let origins = write_all(&mut fs, &docs);
 
     let pre = read_all(&fs, docs.len());
-    assert_eq!(pre, origins, "read-back before scrub must match the source");
+    assert!(pre == origins, "read-back before scrub must match the source");
 
     let cdc_before = fs.cdc_dedup_ratio();
 
     let measurements = fs.scrub().unwrap();
 
     let post = read_all(&fs, docs.len());
-    assert_eq!(post, origins, "read-back after scrub must match the source");
+    assert!(post == origins, "read-back after scrub must match the source");
 
     // CDC ratio only makes sense for the raw chunk database, so read it before
     // the scrub turns every container into a TargetChunk.
@@ -139,7 +144,7 @@ fn full_corpus_survives_scrub_roundtrip() {
 
 /// Reads one named file back fully.
 fn read_file(
-    fs: &FileSystem<B, [u8; 32], K, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
+    fs: &FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
     name: &str,
 ) -> Vec<u8> {
     let handle = fs.open_file_readonly(name).unwrap();
@@ -152,15 +157,17 @@ fn edge_case_documents_roundtrip() {
     let edge: Vec<u8> = corpus.edge_cases.concat();
 
     let mut fs = make_fs();
-    let mut handle = fs.create_file("edge", FastChunker::new(chunk_size())).unwrap();
+    let mut handle = fs
+        .create_file("edge", FastChunker::new(SizeParams::new(CHUNK_MIN, CHUNK_AVG, CHUNK_MAX)))
+        .unwrap();
     fs.write_to_file(&mut handle, &edge).unwrap();
     fs.close_file(handle).unwrap();
 
     let origins = read_file(&fs, "edge");
     let measurements = fs.scrub().unwrap();
     let post = read_file(&fs, "edge");
-    assert_eq!(origins, post);
-    assert_eq!(post, edge, "edge-case documents must survive the scrub");
+    assert!(origins == post);
+    assert!(post == edge, "edge-case documents must survive the scrub");
 
     report(
         "SBC — edge-case round-trip",

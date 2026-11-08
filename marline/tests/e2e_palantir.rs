@@ -4,6 +4,10 @@
 // flow: a base chunk is indexed first, then similar versions are stored as
 // deltas relative to it. `unrelated` documents must not be rewritten into
 // deltas. Every stored entry is decoded back and must match its source.
+//
+// A single persistent `target_map` is passed to `scrub` on every call — the
+// scrubber writes each chunk (raw or delta) straight into it, so the stored
+// bytes are written exactly once and read back from the same map.
 mod common;
 
 use chunkfs::hashers::Sha256Hasher;
@@ -18,7 +22,8 @@ use marline_palantir::types::TierConfig;
 use marline_scrub::decoder::{Decoder, GdeltaDecoder};
 use std::collections::HashMap;
 
-type H = [u8; 32];
+type Hash = [u8; 32];
+type TargetMap = HashMap<Hash, Vec<u8>>;
 
 /// Prints a small aligned key/value block under a title.
 fn report(title: &str, rows: &[(&str, String)]) {
@@ -42,11 +47,11 @@ fn fmt_size(n: usize) -> String {
     out.chars().rev().collect()
 }
 
-fn hash_data(data: &[u8]) -> H {
+fn hash_data(data: &[u8]) -> Hash {
     Sha256Hasher::default().hash(data)
 }
 
-fn make_scrubber() -> PalantirScrubber<PalantirHasher, H, GdeltaEncoder, 3> {
+fn make_scrubber() -> PalantirScrubber<PalantirHasher, Hash, GdeltaEncoder, 3> {
     let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
     let tier_config = TierConfig::new([4, 3, 2]);
     PalantirScrubber::new(
@@ -58,18 +63,17 @@ fn make_scrubber() -> PalantirScrubber<PalantirHasher, H, GdeltaEncoder, 3> {
     )
 }
 
-/// Stores a single document in the scrubber, advancing the index.
-/// Returns the produced target bytes for that chunk.
+/// Feeds a single document to the scrubber, writing the result (raw or delta)
+/// into the shared `target_map` that acts as the storage backend.
 fn store_doc(
-    scrubber: &mut PalantirScrubber<PalantirHasher, H, GdeltaEncoder, 3>,
+    scrubber: &mut PalantirScrubber<PalantirHasher, Hash, GdeltaEncoder, 3>,
+    target_map: &mut TargetMap,
     doc: &[u8],
-) -> Vec<u8> {
+) {
     let hash = hash_data(doc);
-    let mut database: HashMap<H, DataContainer<H>> = HashMap::new();
+    let mut database: HashMap<Hash, DataContainer<Hash>> = HashMap::new();
     database.insert(hash, DataContainer::from(doc.to_vec()));
-    let mut target_map: HashMap<H, Vec<u8>> = HashMap::new();
-    scrubber.scrub(&mut database, &mut target_map).unwrap();
-    target_map.into_iter().next().map(|(_, v)| v).unwrap()
+    scrubber.scrub(&mut database, target_map).unwrap();
 }
 
 /// Decodes a stored target back into source bytes.
@@ -80,20 +84,20 @@ fn store_doc(
 /// each delta against the *terminal* raw chunk, not against the stored bytes
 /// of the intermediate parent.
 fn decode_from_target(
-    scrubber: &PalantirScrubber<PalantirHasher, H, GdeltaEncoder, 3>,
-    targets: &HashMap<H, Vec<u8>>,
-    hash: H,
+    scrubber: &PalantirScrubber<PalantirHasher, Hash, GdeltaEncoder, 3>,
+    target_map: &TargetMap,
+    hash: Hash,
 ) -> Vec<u8> {
     let mut cursor = hash;
     while let Some(&base) = scrubber.delta_bases().get(&cursor) {
         cursor = base;
     }
     if cursor == hash {
-        return targets.get(&hash).expect("terminal chunk must be stored").clone();
+        return target_map.get(&hash).expect("terminal chunk must be stored").clone();
     }
 
-    let root_data = targets.get(&cursor).expect("terminal base chunk must be stored raw");
-    let delta = targets.get(&hash).expect("delta chunk must be stored");
+    let root_data = target_map.get(&cursor).expect("terminal base chunk must be stored raw");
+    let delta = target_map.get(&hash).expect("delta chunk must be stored");
     if delta.len() < 16 {
         // gdelta passes chunks shorter than one word through as raw bytes yet
         // Palantir still records them in `delta_bases`.
@@ -111,20 +115,20 @@ fn similar_group_stores_versions_as_recoverable_deltas() {
     let versions = &group[1..];
 
     let mut scrubber = make_scrubber();
+    let mut target_map: TargetMap = HashMap::new();
+    let base_hash = hash_data(base);
 
     // Base goes in first, stored raw.
-    let base_hash = hash_data(base);
-    let base_stored = store_doc(&mut scrubber, base);
-    assert_eq!(base_stored, *base, "base chunk must be stored raw");
-
-    let mut targets: HashMap<H, Vec<u8>> = HashMap::new();
-    targets.insert(base_hash, base.clone());
+    store_doc(&mut scrubber, &mut target_map, base);
+    assert!(
+        !scrubber.delta_bases().contains_key(&base_hash),
+        "base chunk must be stored raw"
+    );
 
     let mut deltas = 0;
     for version in versions {
         let version_hash = hash_data(version);
-        let stored = store_doc(&mut scrubber, version);
-        targets.insert(version_hash, stored);
+        store_doc(&mut scrubber, &mut target_map, version);
         if scrubber.delta_bases().contains_key(&version_hash) {
             deltas += 1;
         }
@@ -140,12 +144,13 @@ fn similar_group_stores_versions_as_recoverable_deltas() {
 
     let mut ok = 0;
     for version in versions {
-        let decoded = decode_from_target(&scrubber, &targets, hash_data(version));
-        assert_eq!(&decoded, version, "delta chain must reconstruct the version");
+        let decoded = decode_from_target(&scrubber, &target_map, hash_data(version));
+        assert!(&decoded == version, "delta chain must reconstruct the version");
         ok += 1;
     }
 
-    let delta_bytes: usize = versions.iter().map(|v| targets[&hash_data(v)].len()).sum();
+    let delta_bytes: usize =
+        versions.iter().map(|v| target_map[&hash_data(v)].len()).sum();
     let orig_bytes: usize = versions.iter().map(|v| v.len()).sum();
     let saving = 100.0 * (1.0 - delta_bytes as f64 / orig_bytes as f64);
     report(
@@ -166,19 +171,19 @@ fn similar_group_stores_versions_as_recoverable_deltas() {
 fn unrelated_documents_are_stored_raw_and_roundtrip() {
     let corpus = build(42, &Options::default());
     let mut scrubber = make_scrubber();
-    let mut targets: HashMap<H, Vec<u8>> = HashMap::new();
+    let mut target_map: TargetMap = HashMap::new();
 
     let mut stored_bytes: usize = 0;
     for doc in &corpus.unrelated {
         let hash = hash_data(doc);
-        let stored = store_doc(&mut scrubber, doc);
-        targets.insert(hash, stored);
+        store_doc(&mut scrubber, &mut target_map, doc);
         stored_bytes += doc.len();
         assert!(
             !scrubber.delta_bases().contains_key(&hash),
             "unrelated document must not be stored as a delta"
         );
-        assert_eq!(&targets[&hash], doc, "unrelated document must be stored raw");
+        let decoded = decode_from_target(&scrubber, &target_map, hash);
+        assert!(&decoded == doc, "unrelated document must be stored raw");
     }
 
     report(
@@ -197,20 +202,18 @@ fn mixed_corpus_roundtrips_end_to_end() {
     let corpus = build(42, &opts);
     let docs = corpus.all();
     let mut scrubber = make_scrubber();
-    let mut targets: HashMap<H, Vec<u8>> = HashMap::new();
+    let mut target_map: TargetMap = HashMap::new();
 
     // Feed everything in the generator's stable order.
     for doc in &docs {
-        let hash = hash_data(doc);
-        let stored = store_doc(&mut scrubber, doc);
-        targets.insert(hash, stored);
+        store_doc(&mut scrubber, &mut target_map, doc);
     }
 
     // Decode every single chunk through its (possibly empty) delta chain and
     // verify it reproduces the source exactly.
     for (i, doc) in docs.iter().enumerate() {
         let hash = hash_data(doc);
-        let decoded = decode_from_target(&scrubber, &targets, hash);
+        let decoded = decode_from_target(&scrubber, &target_map, hash);
         if &decoded != doc {
             panic!(
                 "doc {i} ({} bytes, in delta_bases: {}) failed to round-trip: got {} bytes",
@@ -228,7 +231,6 @@ fn mixed_corpus_roundtrips_end_to_end() {
             ("docs", docs.len().to_string()),
             ("total bytes", fmt_size(total_bytes)),
             ("deltas stored", scrubber.delta_stored().to_string()),
-            ("round-trip OK", docs.len().to_string()),
         ],
     );
 }
