@@ -82,7 +82,7 @@ impl Encoder for ZdeltaEncoder {
                         hash.clone(),
                         parent_data.as_slice(),
                         &parent_triplet_lookup_table,
-                        parent_hash.clone(),
+                        parent_info.parent_hash.clone(),
                     );
                     data_left += left;
                     total_processed_bytes += processed;

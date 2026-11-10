@@ -1,9 +1,11 @@
 pub use aronovich_hash::{AronovichHash, AronovichHasher};
 pub use odess_hasher::{OdessHash, OdessHasher};
+pub use speedsketch::{SpeedSketchHash, SpeedSketchHasher};
 use std::hash;
 
 mod aronovich_hash;
 pub mod odess_hasher;
+pub mod speedsketch;
 
 /// Defines core hash functionality for Similarity-Based Chunking (SBC).
 pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
@@ -23,6 +25,15 @@ pub trait SBCHash: hash::Hash + Clone + Eq + PartialEq + Default + Send + Sync {
 
     /// Try to represent SBCHash as slice of u64. Used primary for Odess hasher.
     fn as_slice(&self) -> &[u64];
+
+    /// Returns the 64-bit sketch of the chunk, when the hasher produces one.
+    ///
+    /// A sketch lets the delta encoder skip a fingerprint table lookup for words that provably
+    /// cannot be present in the base chunk. Hashers that do not build a sketch return
+    /// `None`, and the encoder then computes it on demand.
+    fn sketch(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// A hasher that produces `SBCHash`-compatible digests from raw data.
@@ -105,3 +116,12 @@ pub(crate) const GEAR: [u64; 256] = [
     0xfb1e6e22e08a03b3, 0xea635fdba3698dd0, 0xcf53659328503a5c, 0xcde3b31e6fd5d780,
     0x8e3e4221d3614413, 0xef14d0d86bf1a22c, 0xe1d830d3f16c5ddb, 0xaabd2b2a451504e1
 ];
+
+/// Returns the Gear table entry for `byte`.
+///
+/// Consumers that need the same rolling hash can use this instead of the table itself, which
+/// stays an implementation detail of the crate.
+#[inline(always)]
+pub fn gear(byte: u8) -> u64 {
+    GEAR[byte as usize]
+}

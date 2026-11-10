@@ -104,11 +104,11 @@ pub trait Encoder {
 ///   Maximum length supported is 2^23-1 bytes.
 /// * `delta_code` - Output buffer where the encoded instruction will be appended.
 ///   Must have enough capacity for 3 + insert_data.len() bytes.
-fn encode_insert_instruction(insert_data: Vec<u8>, delta_code: &mut Vec<u8>) {
+fn encode_insert_instruction(insert_data: &[u8], delta_code: &mut Vec<u8>) {
     let len_bytes = &mut (insert_data.len() as u32).to_ne_bytes()[..3];
     len_bytes[2] |= 1 << 7;
     delta_code.extend_from_slice(len_bytes);
-    delta_code.extend_from_slice(&insert_data);
+    delta_code.extend_from_slice(insert_data);
 }
 
 /// Encodes a COPY instruction.
@@ -183,21 +183,29 @@ fn encode_simple_chunk<D: Decoder, Hash: SBCHash>(
     (data.len(), sbc_hash)
 }
 
-struct ParentChunkInCluster {
+struct ParentChunkInCluster<Hash: SBCHash> {
     index: i32,
     parent_data: Vec<u8>,
     data_left: usize,
+    /// Key the parent chunk is actually stored under.
+    ///
+    /// It differs from the requested `parent_hash` when the parent is not in the target map yet
+    /// and `find_empty_cell` has to probe a neighbouring key, because the key is already taken.
+    /// Delta chunks have to reference this key, otherwise the decoder cannot resolve the parent.
+    parent_hash: Hash,
 }
 
 fn get_parent_data<D: Decoder, Hash: SBCHash>(
     target_map: Arc<Mutex<&mut SBCMap<D, Hash>>>,
     parent_hash: Hash,
     cluster: &mut [ClusterPoint<Hash>],
-) -> ParentChunkInCluster {
+) -> ParentChunkInCluster<Hash> {
     let mut target_map_lock = target_map.lock().unwrap();
     match target_map_lock.get(&SBCKey { hash: parent_hash.clone(), chunk_type: ChunkType::Simple })
     {
-        Ok(parent_data) => ParentChunkInCluster { index: -1, parent_data, data_left: 0 },
+        Ok(parent_data) => {
+            ParentChunkInCluster { index: -1, parent_data, data_left: 0, parent_hash }
+        }
         Err(_) => {
             let (_, parent_data_container) = &mut cluster[0];
             let parent_data = match parent_data_container.extract() {
@@ -207,8 +215,13 @@ fn get_parent_data<D: Decoder, Hash: SBCHash>(
             let (data_left, parent_sbc_hash) =
                 encode_simple_chunk(&mut target_map_lock, parent_data.as_slice(), parent_hash);
 
-            parent_data_container.make_target(vec![parent_sbc_hash]);
-            ParentChunkInCluster { index: 0, parent_data, data_left }
+            parent_data_container.make_target(vec![parent_sbc_hash.clone()]);
+            ParentChunkInCluster {
+                index: 0,
+                parent_data,
+                data_left,
+                parent_hash: parent_sbc_hash.hash,
+            }
         }
     }
 }

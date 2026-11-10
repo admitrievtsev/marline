@@ -104,7 +104,7 @@ impl Encoder for LevenshteinEncoder {
                             data,
                             hash.clone(),
                             parent_chunk.parent_data.as_slice(),
-                            parent_hash.clone(),
+                            parent_chunk.parent_hash.clone(),
                         );
                         data_left += left;
                         processed_data += processed;

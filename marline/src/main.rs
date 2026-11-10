@@ -7,7 +7,7 @@ use chunkfs::FileSystem;
 use marline_scrub::encoder::GdeltaEncoder;
 use marline_scrub::{clusterer, decoder};
 use marline_scrub::{SBCMap, SBCScrubber};
-use marline_sketcher::OdessHasher;
+use marline_sketcher::SpeedSketchHasher;
 use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
@@ -40,8 +40,8 @@ fn main() -> io::Result<()> {
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
             Box::new(SBCScrubber::new(
-                OdessHasher::default(),
-                clusterer::EqClusterer::new(6),
+                SpeedSketchHasher::new(),
+                clusterer::EqClusterer::new(0),
                 GdeltaEncoder::new(false),
             )),
             Sha256Hasher::default(),

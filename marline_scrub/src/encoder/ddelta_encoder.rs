@@ -1,5 +1,5 @@
 use crate::decoder::Decoder;
-use crate::encoder::gdelta_encoder::GEAR;
+use crate::encoder::gdelta_encoder::gear;
 use crate::encoder::{
     count_delta_chunks_with_hash, encode_copy_instruction, encode_insert_instruction,
     get_parent_data, Encoder,
@@ -78,7 +78,7 @@ impl Encoder for DdeltaEncoder {
                             hash.clone(),
                             parent_data.as_slice(),
                             &mut source_chunks_indices,
-                            parent_hash.clone(),
+                            parent_chunk.parent_hash.clone(),
                         );
                     data_left += left_in_delta_chunk;
                     processed_data += processed_in_delta_chunk;
@@ -218,7 +218,7 @@ fn process_target_chunk_with_edelta(
                     delta_code,
                 );
             } else {
-                encode_insert_instruction(target_chunk.to_vec(), delta_code);
+                encode_insert_instruction(target_chunk, delta_code);
                 *target_chunk_position += 1;
             };
         }
@@ -264,7 +264,7 @@ fn process_target_chunk_with_edelta(
                     delta_code,
                 );
             } else {
-                encode_insert_instruction(target_chunk.to_vec(), delta_code);
+                encode_insert_instruction(target_chunk, delta_code);
                 *target_chunk_position += 1;
             };
         }
@@ -283,7 +283,7 @@ fn process_target_chunk_with_ddelta(
             encode_copy_instruction(target_chunk.len(), start_of_match_in_source_data, delta_code);
         }
         None => {
-            encode_insert_instruction(target_chunk.to_vec(), delta_code);
+            encode_insert_instruction(target_chunk, delta_code);
         }
     }
 }
@@ -485,8 +485,7 @@ fn gear_chunking(data: &[u8]) -> Vec<&[u8]> {
     let mask = (1 << AVERAGE_CHUNK_SIZE.next_power_of_two().trailing_zeros()) - 1;
     let mut data_index = 0;
     while data_index < data.len() {
-        current_window_hash =
-            (current_window_hash << 1).wrapping_add(GEAR[data[data_index] as usize]);
+        current_window_hash = (current_window_hash << 1).wrapping_add(gear(data[data_index]));
 
         if (current_window_hash & mask) == CHUNK_THRESHOLD {
             source_chunks.push(&data[start_current_chunk..data_index]);

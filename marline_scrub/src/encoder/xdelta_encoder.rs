@@ -90,8 +90,7 @@ impl XdeltaEncoder {
             }
         }
         if i < chunk_data.len() {
-            let remaining_data = chunk_data[i..].to_vec();
-            encode_insert_instruction(remaining_data, &mut delta_code);
+            encode_insert_instruction(&chunk_data[i..], &mut delta_code);
         }
 
         let (processed_data, sbc_hash) = prepare_and_store_delta_chunk(
@@ -142,7 +141,7 @@ impl Encoder for XdeltaEncoder {
                         hash.clone(),
                         parent_data.as_slice(),
                         &word_hash_offsets,
-                        parent_hash.clone(),
+                        parent_chunk.parent_hash.clone(),
                     );
                     data_left += left;
                     processed_data += processed;
@@ -240,8 +239,7 @@ fn encode_copy_sequence(
         *i += best_len;
     } else {
         let end = min(*i + BLOCK_SIZE, chunk_data.len());
-        let insert_data = chunk_data[*i..end].to_vec();
-        encode_insert_instruction(insert_data, delta_code);
+        encode_insert_instruction(&chunk_data[*i..end], delta_code);
         *i = end;
     }
 }
@@ -283,7 +281,7 @@ fn encode_insert_sequence(
     }
 
     if !insert_data.is_empty() {
-        encode_insert_instruction(insert_data, delta_code);
+        encode_insert_instruction(&insert_data, delta_code);
     }
 }
 

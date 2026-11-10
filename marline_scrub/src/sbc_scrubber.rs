@@ -30,6 +30,18 @@ pub trait EqCluster<'a, Hash: SBCHash> {
 
 impl<'a, Hash: SBCHash> EqCluster<'a, Hash> for Clusters<'a, Hash> {
     fn partial_search(&mut self, key: &Hash, matches: usize) -> &mut Vec<ClusterPoint<'a, Hash>> {
+        // SpeedSketch selects the base chunk by the last 32 bits of the sketch, so the
+        // search degenerates to an exact match on that feature. The linear scan below could only
+        // find a candidate that `contains_key` has already ruled out, and with `matches == 0` it
+        // rejects every candidate after a single comparison, i.e. it is a full O(N) pass for
+        // nothing. Look the key up once and start a new cluster when it is unknown.
+        if matches == 0 {
+            if !self.0.contains_key(key) {
+                self.0.insert(key.clone(), vec![]);
+            }
+            return self.0.get_mut(key).unwrap();
+        }
+
         let _entry = self.0.get_mut(key);
         match self.0.contains_key(key) {
             true => self.0.get_mut(key).unwrap(),
@@ -353,5 +365,38 @@ where
             data_left,
             clusterization_report: Some(clusterization_report),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use marline_sketcher::SpeedSketchHash;
+    use std::collections::HashMap;
+
+    #[test]
+    fn partial_search_zero_matches_reuses_existing_cluster() {
+        let mut clusters = Clusters::<SpeedSketchHash>(HashMap::new());
+        let key = SpeedSketchHash::new_with_u32(42);
+
+        let first = clusters.partial_search(&key, 0) as *const _;
+        assert!(clusters.0.contains_key(&key));
+
+        let second = clusters.partial_search(&key, 0) as *const _;
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(clusters.0.len(), 1);
+    }
+
+    #[test]
+    fn partial_search_zero_matches_creates_cluster_for_new_key() {
+        let mut clusters = Clusters::<SpeedSketchHash>(HashMap::new());
+
+        clusters.partial_search(&SpeedSketchHash::new_with_u32(1), 0);
+        assert_eq!(clusters.0.len(), 1);
+        assert!(clusters.0.contains_key(&SpeedSketchHash::new_with_u32(1)));
+
+        clusters.partial_search(&SpeedSketchHash::new_with_u32(2), 0);
+        assert_eq!(clusters.0.len(), 2);
+        assert!(clusters.0.contains_key(&SpeedSketchHash::new_with_u32(2)));
     }
 }
