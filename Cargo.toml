@@ -16,6 +16,7 @@ huffman-compress = "0.6.1"
 bit-vec = "0.6.3"
 log = "0.4.27"
 fasthash = "0.4.0"
+blake3 = "1.8.5"
 
 
 [profile.release]

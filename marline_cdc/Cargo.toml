@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-marline_utils = {path = "../marline_utils"}
+marline_utils = { path = "../marline_utils" }
+thiserror.workspace = true
 
 [dev-dependencies]
-blake3 = "1.8.5"
+blake3.workspace = true
