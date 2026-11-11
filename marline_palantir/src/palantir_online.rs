@@ -7,7 +7,7 @@ use crate::palantir_scrubber::get_entry;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
 use chunkfs::{ChunkHash, Database};
-use marline_cdc::{collect_raw_features, CdcConfig};
+use marline_cdc::{collect_raw_features, ChunkerBuilder};
 use marline_index::heuristic_index::SearchConfig;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -55,8 +55,8 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
-        let config = CdcConfig::default();
-        let chunker = config.chunker(data);
+        let builder = ChunkerBuilder::default();
+        let chunker = builder.chunker(data);
 
         for (chunk, sf_raw) in chunker {
             let chunk_data = &data[chunk.offset..chunk.offset + chunk.length].to_vec();
@@ -74,8 +74,8 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                         // Baseline: recompute features with a second scan
                         // over the chunk data instead of reusing the
                         // in-pass features.
-                        let sf = collect_raw_features(chunk_data, config.min_size());
-                        debug_assert_eq!(sf, sf_raw, "two-pass features must equal in-pass");
+                        let sf = collect_raw_features(chunk_data, builder.min_size());
+                        debug_assert!(sf == sf_raw, "two-pass features must equal in-pass");
                         self.sf_gen.generate_from_raw(&sf)
                     } else {
                         self.sf_gen.generate_from_raw(&sf_raw)

@@ -1,6 +1,6 @@
 //! Content-defined chunking (FastCDC v2020) with in-pass feature collection.
 //!
-//! [`CdcConfig`] is the entry point: it validates chunk size parameters and
+//! [`ChunkerBuilder`] is the entry point: it validates chunk size parameters and
 //! builds slice ([`FastCDC`]) and streaming ([`StreamCDC`]) chunkers.
 
 // The module stays `pub` only because the doc-tests of the vendored `fastcdc.rs`
@@ -16,10 +16,10 @@ use marline_utils::{KB, MB};
 
 use fastcdc::{AVERAGE_MAX, AVERAGE_MIN, MAXIMUM_MAX, MAXIMUM_MIN, MINIMUM_MAX, MINIMUM_MIN};
 
-/// Error returned when chunk size parameters are rejected.
+/// Error returned when chunk size parameters are rejected by [`ChunkerBuilder`].
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum ConfigError {
+pub enum ChunkerBuilderError {
     /// Sizes are outside the supported ranges or are not ordered as `min <= avg <= max`.
     #[error("invalid chunk sizes: min={min}, avg={avg}, max={max}")]
     InvalidSizes {
@@ -32,36 +32,44 @@ pub enum ConfigError {
     },
 }
 
-/// Validated chunk size parameters for content-defined chunking.
+/// Validates chunk size parameters and builds content-defined chunkers.
 #[derive(Debug, Clone, Copy)]
-pub struct CdcConfig {
+pub struct ChunkerBuilder {
     min_size: usize,
     avg_size: usize,
     max_size: usize,
 }
 
 /// Default sizes: 512 KB minimum, 1 MB average and 2 MB maximum chunk size.
-impl Default for CdcConfig {
+impl Default for ChunkerBuilder {
     fn default() -> Self {
         Self { min_size: 512 * KB, avg_size: MB, max_size: 2 * MB }
     }
 }
 
-impl CdcConfig {
-    /// Creates a configuration from minimum, average and maximum chunk sizes in bytes.
+impl ChunkerBuilder {
+    /// Creates a builder from minimum, average and maximum chunk sizes in bytes.
     ///
     /// # Errors
     ///
-    /// Returns [`ConfigError::InvalidSizes`] if any size is outside its supported range
+    /// Returns [`ChunkerBuilderError::InvalidSizes`] if any size is outside its supported range
     /// or the sizes are not ordered as `min_size <= avg_size <= max_size`.
-    pub fn new(min_size: usize, avg_size: usize, max_size: usize) -> Result<Self, ConfigError> {
+    pub fn new(
+        min_size: usize,
+        avg_size: usize,
+        max_size: usize,
+    ) -> Result<Self, ChunkerBuilderError> {
         let valid = (MINIMUM_MIN..=MINIMUM_MAX).contains(&min_size)
             && (AVERAGE_MIN..=AVERAGE_MAX).contains(&avg_size)
             && (MAXIMUM_MIN..=MAXIMUM_MAX).contains(&max_size)
             && min_size <= avg_size
             && avg_size <= max_size;
         if !valid {
-            return Err(ConfigError::InvalidSizes { min: min_size, avg: avg_size, max: max_size });
+            return Err(ChunkerBuilderError::InvalidSizes {
+                min: min_size,
+                avg: avg_size,
+                max: max_size,
+            });
         }
         Ok(Self { min_size, avg_size, max_size })
     }
@@ -114,9 +122,17 @@ mod tests {
             .collect()
     }
 
+    /// Number of raw features collected per chunk.
+    const FEATURE_COUNT: usize = 12;
+
     /// Checks that `chunks` tile `[0, len)` contiguously and respect the size bounds
     /// (every chunk except the last is in `[min, max]`, the last is `<= max`).
-    fn assert_chunk_layout(chunks: &[(Chunk, [u32; 12])], len: usize, min: usize, max: usize) {
+    fn assert_chunk_layout(
+        chunks: &[(Chunk, [u32; FEATURE_COUNT])],
+        len: usize,
+        min: usize,
+        max: usize,
+    ) {
         let mut total_bytes = 0;
         let last = chunks.len().saturating_sub(1);
         for (i, (chunk, _features)) in chunks.iter().enumerate() {
@@ -141,8 +157,8 @@ mod tests {
     /// Checks that streaming chunks are element-wise identical to slice chunks of `data`.
     fn assert_stream_matches_slice(
         data: &[u8],
-        slice_chunks: &[(Chunk, [u32; 12])],
-        stream_chunks: &[(ChunkData, [u32; 12])],
+        slice_chunks: &[(Chunk, [u32; FEATURE_COUNT])],
+        stream_chunks: &[(ChunkData, [u32; FEATURE_COUNT])],
     ) {
         assert_eq!(
             slice_chunks.len(),
@@ -228,7 +244,10 @@ mod tests {
         ];
         for (min, avg, max) in cases {
             assert!(
-                matches!(CdcConfig::new(min, avg, max), Err(ConfigError::InvalidSizes { .. })),
+                matches!(
+                    ChunkerBuilder::new(min, avg, max),
+                    Err(ChunkerBuilderError::InvalidSizes { .. })
+                ),
                 "Sizes (min={min}, avg={avg}, max={max}) must be rejected"
             );
         }
@@ -236,45 +255,45 @@ mod tests {
 
     #[test]
     fn test_new_accepts_range_bounds() {
-        assert!(CdcConfig::new(MINIMUM_MAX, AVERAGE_MAX, MAXIMUM_MAX).is_ok());
+        assert!(ChunkerBuilder::new(MINIMUM_MAX, AVERAGE_MAX, MAXIMUM_MAX).is_ok());
 
-        let config =
-            CdcConfig::new(MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN).expect("lower bounds are valid");
+        let builder = ChunkerBuilder::new(MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN)
+            .expect("lower bounds are valid");
         let data = generate_test_data(64 * KB);
-        let chunks: Vec<_> = config.chunker(&data).collect();
+        let chunks: Vec<_> = builder.chunker(&data).collect();
         assert_chunk_layout(&chunks, data.len(), MINIMUM_MIN, MAXIMUM_MIN);
     }
 
     #[test]
     fn test_default_is_valid() {
-        let d = CdcConfig::default();
-        assert!(CdcConfig::new(d.min_size, d.avg_size, d.max_size).is_ok());
+        let d = ChunkerBuilder::default();
+        assert!(ChunkerBuilder::new(d.min_size, d.avg_size, d.max_size).is_ok());
     }
 
     #[test]
     fn test_default_chunker_invariants() {
-        let config = CdcConfig::default();
+        let builder = ChunkerBuilder::default();
         let data = generate_test_data(6 * MB);
-        let chunks: Vec<_> = config.chunker(&data).collect();
+        let chunks: Vec<_> = builder.chunker(&data).collect();
 
         assert!(chunks.len() >= 2, "6 MB input must produce several chunks, got {}", chunks.len());
-        assert_chunk_layout(&chunks, data.len(), config.min_size, config.max_size);
+        assert_chunk_layout(&chunks, data.len(), builder.min_size, builder.max_size);
     }
 
     #[test]
     fn test_chunker_empty() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let data: &[u8] = &[];
-        let chunks: Vec<_> = config.chunker(data).collect();
+        let chunks: Vec<_> = builder.chunker(data).collect();
 
         assert!(chunks.is_empty(), "Empty input should not yield any chunks");
     }
 
     #[test]
     fn test_stream_chunker_empty() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let reader = Cursor::new(Vec::<u8>::new());
-        let chunks: Vec<_> = config
+        let chunks: Vec<_> = builder
             .stream_chunker(reader)
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading an empty stream should succeed");
@@ -284,9 +303,9 @@ mod tests {
 
     #[test]
     fn test_chunker_data_smaller_than_min_size() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let data = generate_test_data(128); // Smaller than min_size (256)
-        let chunks: Vec<_> = config.chunker(&data).collect();
+        let chunks: Vec<_> = builder.chunker(&data).collect();
 
         assert_eq!(chunks.len(), 1, "Exactly one trailing chunk should be produced");
 
@@ -298,10 +317,10 @@ mod tests {
     #[test]
     fn test_chunker_invariants() {
         let (min_size, avg_size, max_size) = (256, 1024, 4096);
-        let config = CdcConfig::new(min_size, avg_size, max_size).expect("valid config");
+        let builder = ChunkerBuilder::new(min_size, avg_size, max_size).expect("valid sizes");
 
         let data = generate_test_data(64 * KB);
-        let chunks: Vec<_> = config.chunker(&data).collect();
+        let chunks: Vec<_> = builder.chunker(&data).collect();
 
         assert!(!chunks.is_empty());
         assert_chunk_layout(&chunks, data.len(), min_size, max_size);
@@ -310,12 +329,12 @@ mod tests {
     #[test]
     fn test_uniform_data_hits_max_size() {
         let max_size = 4096;
-        let config = CdcConfig::new(256, 1024, max_size).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, max_size).expect("valid sizes");
 
         // All-zero input is a deliberate pathological case: the rolling hash never
         // finds a content-defined cut point, so every cut is forced at max_size.
         let data = vec![0u8; 20 * KB];
-        let chunks: Vec<_> = config.chunker(&data).collect();
+        let chunks: Vec<_> = builder.chunker(&data).collect();
 
         assert_eq!(chunks.len(), 5);
         for (i, (chunk, _)) in chunks.iter().enumerate() {
@@ -326,11 +345,11 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_matches_chunker() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let data = generate_test_data(32 * KB);
 
-        let slice_chunks: Vec<_> = config.chunker(&data).collect();
-        let stream_chunks: Vec<_> = config
+        let slice_chunks: Vec<_> = builder.chunker(&data).collect();
+        let stream_chunks: Vec<_> = builder
             .stream_chunker(Cursor::new(&data))
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading from Cursor should not fail");
@@ -340,12 +359,12 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_short_reads_match_chunker() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let data = generate_test_data(32 * KB);
 
-        let slice_chunks: Vec<_> = config.chunker(&data).collect();
+        let slice_chunks: Vec<_> = builder.chunker(&data).collect();
         let reader = ShortReader { data: &data, pos: 0, state: 0x0123_4567_89AB_CDEF };
-        let stream_chunks: Vec<_> = config
+        let stream_chunks: Vec<_> = builder
             .stream_chunker(reader)
             .collect::<Result<Vec<_>, _>>()
             .expect("Short reads should not fail");
@@ -355,10 +374,10 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_propagates_read_error() {
-        let config = CdcConfig::new(256, 1024, 4096).expect("valid config");
+        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
         let reader = FailingReader { data: generate_test_data(1000), pos: 0 };
 
-        let first = config.stream_chunker(reader).next();
+        let first = builder.stream_chunker(reader).next();
         assert!(
             matches!(first, Some(Err(StreamError::IoError(_)))),
             "Read failure must surface as StreamError::IoError, got {first:?}"
