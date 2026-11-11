@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+clap = "4.6.7"
 sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true
@@ -20,3 +21,7 @@ blake3 = "1.8.5"
 [[bin]]
 name = "palantir_metrics"
 path = "src/bin/palantir_metrics.rs"
+
+[[bin]]
+name = "palantir_lifecycle_bench"
+path = "src/bin/palantir_lifecycle_bench.rs"

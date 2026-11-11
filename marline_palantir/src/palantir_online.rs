@@ -4,17 +4,85 @@ use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
 use crate::mock_rocksdb::{Entry, MockRocksDBMap};
-use crate::palantir_scrubber::get_entry;
+use crate::palantir_scrubber::{get_entry, resolve_root};
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
 use chunkfs::{ChunkHash, Database};
 use marline_index::heuristic_index::SearchConfig;
+use marline_index::index::IndexError;
+use marline_scrub::decoder::{Decoder, GdeltaDecoder};
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::time::Instant;
 
 /// Minimum chunk size used by the online chunker; also the start of the
 /// feature-collection window inside each chunk.
 pub const CHUNK_MIN_SIZE: usize = 1024 * 512;
+
+/// Default number of chunks written before a new backup version starts.
+pub const DEFAULT_CHUNKS_PER_VERSION: usize = 1500;
+
+/// Statistics for one backup version completed by
+/// [`PalantirOnline::finish_version`].
+#[derive(Clone, Debug)]
+pub struct VersionReport<const N: usize> {
+    /// Zero-based index of the version.
+    index: usize,
+    /// Number of chunks written in this version.
+    chunks: u64,
+    /// Number of input bytes written in this version.
+    bytes: u64,
+    /// Payload bytes stored in this version (increase of `bytes_stored`
+    /// across the version).
+    stored_bytes: u64,
+    /// Number of super-feature entries evicted per tier at the end of the
+    /// version.
+    evicted: [usize; N],
+    /// Wall-clock time from the start of the version to the end of its
+    /// `finish_version` call.
+    duration: std::time::Duration,
+    /// Wall-clock time spent inside this version's `finish_version` call
+    /// (lifecycle metric update + eviction). The pure `write` time for the
+    /// version is `duration - finish_duration`.
+    finish_duration: std::time::Duration,
+}
+
+impl<const N: usize> VersionReport<N> {
+    /// Zero-based index of the version.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Number of chunks written in this version.
+    pub fn chunks(&self) -> u64 {
+        self.chunks
+    }
+
+    /// Number of input bytes written in this version.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// Payload bytes stored in this version.
+    pub fn stored_bytes(&self) -> u64 {
+        self.stored_bytes
+    }
+
+    /// Number of super-feature entries evicted per tier at the end of the version.
+    pub fn evicted(&self) -> &[usize; N] {
+        &self.evicted
+    }
+
+    /// Wall-clock time from the start of the version to the end of its `finish_version` call.
+    pub fn duration(&self) -> std::time::Duration {
+        self.duration
+    }
+
+    /// Wall-clock time spent inside this version's `finish_version` call.
+    pub fn finish_duration(&self) -> std::time::Duration {
+        self.finish_duration
+    }
+}
 
 pub trait OnlineSBC<
     S,
@@ -52,6 +120,20 @@ pub struct PalantirOnline<
     delta_bases: HashMap<H, H>,
     manifest_base: MockRocksDBMap,
     target_map: HashMap<H, Vec<u8>>,
+    /// Number of chunks written before a new version starts.
+    chunks_per_version: usize,
+    /// Chunks written since the current version started.
+    chunks_in_version: usize,
+    /// Input bytes seen since the current version started.
+    version_bytes_in: u64,
+    /// Payload bytes stored (`bytes_stored`) when the current version started.
+    version_stored_start: usize,
+    /// Index of the next version to be reported.
+    version_index: usize,
+    /// Instant at which the current version started.
+    version_started: Instant,
+    /// Reports for every completed version.
+    reports: Vec<VersionReport<N>>,
 }
 
 #[allow(unused_variables)]
@@ -87,6 +169,10 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
 
                     match self.metadata_manager.lookup_super_features(&super_features) {
                         Some((base_hash, _)) => {
+                            // Deltas are encoded against the root of the
+                            // base's chain, so the new chunk must point at
+                            // that same root for reconstruction to replay.
+                            let root_hash = resolve_root(&self.delta_bases, &base_hash.hash);
                             let entry = get_entry(
                                 &mut self.manifest_base,
                                 &self.delta_bases,
@@ -110,7 +196,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                         / simple_compressed.len() as f64;
                                     if ratio < self.fp_threshold {
                                         let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
+                                        self.delta_bases.insert(*hash, root_hash);
                                         self.delta_stored += 1;
                                     } else {
                                         self.target_map.insert(*hash, chunk_data.clone());
@@ -120,26 +206,25 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                     }
                                 }
                                 None => {
-                                    /*
-                                    let fp_table = E::generate_fp_table(&data);
-                                    let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
-
-                                    let delta = self
-                                        .encoder
-                                        .encode_with_manifest(chunk_data, &data, &fp_table.unwrap());
-                                        */
-
-                                    //let delta = self.encoder.encode(chunk_data, &data);
-
-                                    //let delta_compressed =
-                                    //   zstd::encode_all(delta.as_slice(), 0).unwrap();
-
-                                    // let delta_compressed = zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
-                                    let delta_compressed = data;
-
-                                    let _ = self.target_map.insert(*hash, delta_compressed);
-                                    self.delta_bases.insert(*hash, base_hash.hash);
-                                    self.delta_stored += 1;
+                                    // No manifest for this base: fall back to a plain
+                                    // gdelta diff against the resolved base chunk.
+                                    let delta = self.encoder.encode(chunk_data, &data);
+                                    let delta_compressed =
+                                        zstd::encode_all(delta.as_slice(), 0).unwrap();
+                                    let simple_compressed =
+                                        zstd::encode_all(chunk_data.as_slice(), 0).unwrap();
+                                    let ratio = delta_compressed.len() as f64
+                                        / simple_compressed.len() as f64;
+                                    if ratio < self.fp_threshold {
+                                        let _ = self.target_map.insert(*hash, delta_compressed);
+                                        self.delta_bases.insert(*hash, root_hash);
+                                        self.delta_stored += 1;
+                                    } else {
+                                        self.target_map.insert(*hash, chunk_data.clone());
+                                        let _ = &mut self
+                                            .manifest_base
+                                            .insert(*hash, Entry::from(chunk_data.clone()));
+                                    }
                                 }
                             }
                         }
@@ -158,15 +243,16 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                 }
             }
             self.chunks_processed += 1;
+            self.chunks_in_version += 1;
+            self.version_bytes_in += chunk_data.len() as u64;
+            if self.chunks_in_version >= self.chunks_per_version {
+                self.finish_version().map_err(|e| PalantirError::MetadataError(e.to_string()))?;
+            }
         }
         Ok(())
     }
     fn bytes_stored(&self) -> usize {
-        let mut size = 0usize;
-        for val in self.target_map.values() {
-            size += val.len()
-        }
-        size
+        self.stored_bytes()
     }
 }
 
@@ -211,7 +297,111 @@ impl<
             delta_bases: HashMap::new(),
             manifest_base: MockRocksDBMap::new(),
             target_map: HashMap::new(),
+            chunks_per_version: DEFAULT_CHUNKS_PER_VERSION,
+            chunks_in_version: 0,
+            version_bytes_in: 0,
+            version_stored_start: 0,
+            version_index: 0,
+            version_started: Instant::now(),
+            reports: Vec::new(),
         }
+    }
+
+    /// Closes the current backup version: advances the lifecycle metric of
+    /// every tier and evicts the blocks whose metric expired.
+    ///
+    /// If at least one chunk was written since the previous version, a
+    /// [`VersionReport`] is recorded and can be retrieved with
+    /// [`version_reports`](Self::version_reports). This is also called
+    /// automatically by [`write`](OnlineSBC::write) after every
+    /// `chunks_per_version` chunks.
+    ///
+    /// Returns the number of evicted entries per tier.
+    pub fn finish_version(&mut self) -> Result<[usize; N], IndexError> {
+        let finish_start = Instant::now();
+        let evicted = self.metadata_manager.finish_version_counted()?;
+        let finish_duration = finish_start.elapsed();
+        if self.chunks_in_version > 0 {
+            let stored_now = self.stored_bytes();
+            self.reports.push(VersionReport {
+                index: self.version_index,
+                chunks: self.chunks_in_version as u64,
+                bytes: self.version_bytes_in,
+                stored_bytes: (stored_now - self.version_stored_start) as u64,
+                evicted,
+                duration: self.version_started.elapsed(),
+                finish_duration,
+            });
+            self.version_index += 1;
+            self.chunks_in_version = 0;
+            self.version_bytes_in = 0;
+            self.version_stored_start = stored_now;
+            self.version_started = Instant::now();
+        }
+        Ok(evicted)
+    }
+
+    /// Reports for all versions completed so far, in chronological order.
+    pub fn version_reports(&self) -> &[VersionReport<N>] {
+        &self.reports
+    }
+
+    /// Sets how many chunks are written before a new version starts.
+    ///
+    /// `write` calls [`finish_version`](Self::finish_version) once this many
+    /// chunks have been written since the last version boundary.
+    pub fn set_chunks_per_version(&mut self, chunks: usize) {
+        self.chunks_per_version = chunks.max(1);
+    }
+
+    /// Number of fingerprints tracked in the exact-duplicate table.
+    ///
+    /// Not affected by [`finish_version`](Self::finish_version): fingerprints
+    /// are kept until the whole index is dropped.
+    pub fn fp_table_size(&self) -> usize {
+        self.metadata_manager.fp_table_size()
+    }
+
+    /// Total number of posting-list entries across all super-feature tiers.
+    ///
+    /// This counts feature-to-block postings, not distinct blocks.
+    pub fn sf_table_size(&self) -> usize {
+        self.metadata_manager.sf_table_size()
+    }
+
+    /// Total chunks processed since the instance was created.
+    pub fn chunks_processed(&self) -> u64 {
+        self.chunks_processed
+    }
+
+    /// Number of chunks stored as deltas since the instance was created.
+    pub fn delta_stored(&self) -> u64 {
+        self.delta_stored
+    }
+
+    /// Total payload bytes currently held in `target_map`.
+    fn stored_bytes(&self) -> usize {
+        self.target_map.values().map(|v| v.len()).sum()
+    }
+
+    /// Reconstructs the original bytes of a stored chunk by replaying its
+    /// delta chain from the root base chunk.
+    ///
+    /// Returns `None` when `key` is not present in `target_map`.
+    pub fn reconstruct(&self, key: &H) -> Option<Vec<u8>> {
+        let mut chain: Vec<H> = Vec::new();
+        let mut cur = key.clone();
+        while let Some(base) = self.delta_bases.get(&cur) {
+            chain.push(cur.clone());
+            cur = base.clone();
+        }
+
+        let mut data = self.target_map.get(&cur)?.clone();
+        for stored_key in chain.iter().rev() {
+            let delta = self.target_map.get(stored_key)?;
+            data = GdeltaDecoder::new(true).decode_chunk(data, delta);
+        }
+        Some(data)
     }
 
     /// Switches between the optimized single-pass and baseline two-pass

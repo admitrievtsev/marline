@@ -95,12 +95,19 @@ impl<H: ChunkHash + Send + Sync, const N: usize> MetadataManager<H, N> {
 
     /// Finish version: update lifecycle metrics and remove expired entries
     pub fn finish_version(&self) -> Result<(), IndexError> {
+        self.finish_version_counted().map(|_| ())
+    }
+
+    /// Same as [`finish_version`](Self::finish_version), but reports how many
+    /// entries each tier evicted.
+    pub fn finish_version_counted(&self) -> Result<[usize; N], IndexError> {
+        let mut evicted = [0usize; N];
         for (id, table) in self.sf_tables.iter().enumerate() {
             let upd_fn = self.lifecycle_manager.tier_between_backups_upd_fn(id as TierID);
             let filter_fn = self.lifecycle_manager.tier_drop_or_not_fn(id as TierID);
-            table.update_and_clean(upd_fn, filter_fn)?;
+            evicted[id] = table.update_and_clean(upd_fn, filter_fn)?;
         }
-        Ok(())
+        Ok(evicted)
     }
 
     pub fn fp_table_size(&self) -> usize {
@@ -199,11 +206,14 @@ impl<H: ChunkHash + Send + Sync> AnySFTable<H> {
         any_sf_method!(self, get_with_upd_metric(features, f))
     }
 
+    /// Updates lifecycle metrics tier-by-tier and removes expired entries.
+    ///
+    /// Returns the number of evicted entries per tier.
     pub fn update_and_clean(
         &self,
         update_fn: impl FnMut(Metric) -> Metric,
         cleanup_fn: impl Fn(Metric) -> bool,
-    ) -> Result<(), IndexError> {
+    ) -> Result<usize, IndexError> {
         any_sf_method!(self, update_and_clean(update_fn, cleanup_fn))
     }
 }

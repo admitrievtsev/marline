@@ -1,11 +1,33 @@
-use std::path::{Path, PathBuf};
+//! Run `palantir_backup_bench --help` for available command-line options.
+
+use std::path::Path;
 use std::time::Instant;
 
+#[path = "support/args.rs"]
+mod args;
+
+use args::{add_benchmark_args, data_dir, output};
+use clap::{error::ErrorKind, value_parser, Arg, Command};
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
 use marline_palantir::palantir_online::{OnlineSBC, PalantirOnline};
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::TierConfig;
+
+fn cli() -> clap::ArgMatches {
+    add_benchmark_args(
+        Command::new("palantir_backup_bench")
+            .about("Benchmark Palantir backup encoding on the configured kernel scenarios")
+            .arg(
+                Arg::new("runs")
+                    .long("runs")
+                    .value_name("COUNT")
+                    .help("Number of benchmark repetitions (default: 3)")
+                    .value_parser(value_parser!(usize)),
+            ),
+    )
+    .get_matches()
+}
 
 fn collect_files(dir: &Path, files: &mut Vec<Vec<u8>>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -33,12 +55,13 @@ fn load_kernel(dir: &Path) -> Vec<u8> {
 }
 
 fn main() {
-    let base = match std::env::var_os("MARLINE_DATA_DIR") {
-        Some(v) => PathBuf::from(v),
-        None => {
-            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".marline")
-        }
-    };
+    let matches = cli();
+    let base = data_dir(&matches);
+    let out = output(&matches);
+    let runs = matches.get_one::<usize>("runs").copied().unwrap_or(3);
+    if runs == 0 {
+        clap::Error::raw(ErrorKind::ValueValidation, "--runs must be greater than zero").exit();
+    }
 
     let scenario1 = ["linux-3.4.5", "linux-3.6.6"];
     let scenario2 = ["linux-3.10.8"];
@@ -63,8 +86,6 @@ fn main() {
         println!("{} {}: {:.2} MiB", group, version, data.len() as f64 / (1024.0 * 1024.0));
     }
 
-    let out = std::env::var_os("OUT").map(PathBuf::from);
-    let runs: usize = std::env::var("RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
     let mut csv =
         String::from("run,group,mode,kernel,kernel_mib,elapsed_s,mbps,stored_mib,dedup_ratio\n");
 

@@ -252,7 +252,7 @@ pub(crate) fn get_manifest<'a>(
 
 pub(crate) fn get_entry<'a>(
     target_map: &'a mut MockRocksDBMap,
-    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
+    delta_bases: &'a HashMap<[u8; 32], [u8; 32]>,
     hash: &[u8; 32],
 ) -> &'a mut Entry {
     let mut chain = Vec::new();
@@ -263,4 +263,18 @@ pub(crate) fn get_entry<'a>(
     }
 
     target_map.get_2_mut(&cur).unwrap()
+}
+
+/// Walks `delta_bases` from `hash` up to the root chunk that
+/// [`get_entry`] resolves to, and returns its key.
+///
+/// Deltas are always computed against that root, so a chunk must point at it
+/// (and not at the intermediate base that similarity search matched) for the
+/// replay in [`decoder`] to reproduce the original bytes.
+pub(crate) fn resolve_root(delta_bases: &HashMap<[u8; 32], [u8; 32]>, hash: &[u8; 32]) -> [u8; 32] {
+    let mut cur = *hash;
+    while let Some(&base) = delta_bases.get(&cur) {
+        cur = base;
+    }
+    cur
 }
