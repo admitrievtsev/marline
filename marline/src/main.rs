@@ -4,10 +4,9 @@ extern crate marline_scrub;
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::FileSystem;
-use marline_scrub::encoder::GdeltaEncoder;
 use marline_scrub::{clusterer, decoder};
 use marline_scrub::{SBCMap, SBCScrubber};
-use marline_sketcher::SpeedSketchHasher;
+use marline_sketcher::SpeedSketchConfig;
 use std::collections::HashMap;
 use std::io;
 use std::time::Instant;
@@ -33,16 +32,15 @@ fn main() -> io::Result<()> {
     for i in 0..num_iterations {
         let total_start = Instant::now();
 
-        // According to Odess sizes
-        let chunk_size = SizeParams::new(16 * 1024, 32 * 1024, 64 * 1024);
+        let chunk_size = SizeParams::new(4 * 1024, 8 * 1024, 64 * 1024);
 
         let mut fs = FileSystem::new_with_scrubber(
             HashMap::default(),
             SBCMap::new(decoder::GdeltaDecoder::new(false)),
-            Box::new(SBCScrubber::new(
-                SpeedSketchHasher::new(),
+            Box::new(SBCScrubber::new_speedsketch(
+                SpeedSketchConfig::default(),
                 clusterer::EqClusterer::new(0),
-                GdeltaEncoder::new(false),
+                false,
             )),
             Sha256Hasher::default(),
         );

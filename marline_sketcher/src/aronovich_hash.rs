@@ -37,12 +37,6 @@ impl PartialEq<Self> for AronovichHash {
     }
 }
 
-impl Default for AronovichHash {
-    fn default() -> Self {
-        Self::new_with_u32(u32::default())
-    }
-}
-
 impl SBCHash for AronovichHash {
     fn new_with_u32(hash: u32) -> Self {
         AronovichHash { hash }

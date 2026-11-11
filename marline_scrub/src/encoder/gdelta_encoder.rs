@@ -6,7 +6,7 @@ use crate::sbc_scrubber::ClusterPoint;
 use crate::{ChunkType, SBCHash, SBCKey, SBCMap};
 use chunkfs::Data;
 use chunkfs::Database;
-use marline_sketcher::speedsketch;
+use marline_sketcher::speedsketch::{self, SpeedSketchConfig};
 use std::cmp::min;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,6 +14,7 @@ use zstd::stream;
 
 pub struct GdeltaEncoder {
     zstd_flag: bool,
+    sketch_config: SpeedSketchConfig,
 }
 
 /// Everything a delta chunk is encoded against, built once per cluster: the bytes of the base
@@ -33,7 +34,17 @@ impl Default for GdeltaEncoder {
 
 impl GdeltaEncoder {
     pub fn new(zstd_flag: bool) -> Self {
-        GdeltaEncoder { zstd_flag }
+        Self::with_sketch_config(zstd_flag, SpeedSketchConfig::default())
+    }
+
+    /// Creates an encoder that uses the same sketch masks as the hasher that produced the
+    /// chunk hashes.
+    pub fn with_sketch_config(zstd_flag: bool, sketch_config: SpeedSketchConfig) -> Self {
+        GdeltaEncoder { zstd_flag, sketch_config }
+    }
+
+    pub fn sketch_config(&self) -> &SpeedSketchConfig {
+        &self.sketch_config
     }
 
     /// Encodes `chunk_data` against `base` as a list of INSERT and COPY instructions.
@@ -127,9 +138,26 @@ impl GdeltaEncoder {
         hash: Hash,
         base: &BaseChunk<Hash>,
     ) -> (usize, usize, SBCKey<Hash>) {
+        if let Some(id) = hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
+        if let Some(id) = base.sbc_hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "base chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
+
         // Sketch of the input chunk. Reused from the hashing stage when the hasher already
         // produced one, computed here otherwise.
-        let sketch_input = hash.sketch().unwrap_or_else(|| speedsketch::sketch(chunk_data));
+        let sketch_input = hash
+            .sketch()
+            .unwrap_or_else(|| speedsketch::sketch_with(chunk_data, self.sketch_config.masks()));
         let mut delta_code = GdeltaEncoder::delta_code(chunk_data, base, sketch_input);
 
         let mut target_map_lock = target_map.lock().unwrap();
@@ -162,6 +190,13 @@ impl Encoder for GdeltaEncoder {
         let mut data_left = parent_chunk.data_left;
         let parent_data = parent_chunk.parent_data;
         let parent_sbc_hash = parent_chunk.parent_hash;
+        if let Some(id) = parent_sbc_hash.sketch_config_id() {
+            assert_eq!(
+                id,
+                self.sketch_config.id(),
+                "parent chunk hash was produced with a different SpeedSketch configuration"
+            );
+        }
         let word_size: usize = speedsketch::WORD_SIZE;
         let move_bts: usize = 64 / word_size;
         let mut word_hash_offsets: HashMap<u64, usize> = HashMap::new();
@@ -182,7 +217,7 @@ impl Encoder for GdeltaEncoder {
             fp = (fp << move_bts).wrapping_add(gear(parent_data[i + word_size - 1]));
             let word_hash: u64 = fp >> (64 - mask_bts);
             word_hash_offsets.insert(word_hash, i);
-            if speedsketch::is_proxy(fp) {
+            if speedsketch::is_proxy_with(fp, self.sketch_config.masks()) {
                 base_sketch |= 1u64 << speedsketch::class_of(fp);
             }
         }
@@ -198,18 +233,16 @@ impl Encoder for GdeltaEncoder {
             if parent_chunk.index > -1 && chunk_id == parent_chunk.index as usize {
                 continue;
             }
-            let mut target_hash = SBCKey::default();
             match data_container.extract() {
                 Data::Chunk(data) => {
                     let (left, processed, sbc_hash) =
                         self.encode_delta_chunk(target_map.clone(), data, hash.clone(), &base);
                     data_left += left;
                     processed_data += processed;
-                    target_hash = sbc_hash;
+                    data_container.make_target(vec![sbc_hash]);
                 }
                 Data::TargetChunk(_) => {}
             }
-            data_container.make_target(vec![target_hash]);
         }
         (data_left, processed_data)
     }
@@ -398,7 +431,11 @@ mod tests {
 
     /// Mirrors the base chunk state `encode_cluster` builds, so `delta_code` can be exercised
     /// directly without a `DataContainer` cluster.
-    fn build_base(data: &[u8], sbc_hash: SpeedSketchHash) -> BaseChunk<'_, SpeedSketchHash> {
+    fn build_base<'a>(
+        data: &'a [u8],
+        sbc_hash: SpeedSketchHash,
+        config: &SpeedSketchConfig,
+    ) -> BaseChunk<'a, SpeedSketchHash> {
         let word_size = speedsketch::WORD_SIZE;
         let move_bts = 64 / word_size;
         let mask_bts = ((data.len() as f64).log2() as usize).max(1);
@@ -412,7 +449,7 @@ mod tests {
         for i in 0..base_words {
             fp = (fp << move_bts).wrapping_add(gear(data[i + word_size - 1]));
             word_hash_offsets.insert(fp >> (64 - mask_bts), i);
-            if speedsketch::is_proxy(fp) {
+            if speedsketch::is_proxy_with(fp, config.masks()) {
                 sketch |= 1u64 << speedsketch::class_of(fp);
             }
         }
@@ -420,8 +457,9 @@ mod tests {
     }
 
     fn encode(base: &[u8], new: &[u8]) -> Vec<u8> {
-        let base_chunk = build_base(base, SpeedSketchHash::new_with_u32(0));
-        GdeltaEncoder::delta_code(new, &base_chunk, speedsketch::sketch(new))
+        let config = SpeedSketchConfig::default();
+        let base_chunk = build_base(base, SpeedSketchHash::new_with_u32(0), &config);
+        GdeltaEncoder::delta_code(new, &base_chunk, speedsketch::sketch_with(new, config.masks()))
     }
 
     fn decode(base: &[u8], delta: &[u8]) -> Vec<u8> {
@@ -528,11 +566,12 @@ mod tests {
         assert_ne!(stored_key.hash, requested_parent_hash, "an occupied key must be shifted");
         assert_eq!(stored_key.hash, requested_parent_hash.next_hash());
 
-        let base = build_base(parent.as_slice(), stored_key.hash.clone());
+        let config = SpeedSketchConfig::default();
+        let base = build_base(parent.as_slice(), stored_key.hash.clone(), &config);
         let delta = GdeltaEncoder::delta_code(
             child.as_slice(),
             &base,
-            speedsketch::sketch(child.as_slice()),
+            speedsketch::sketch_with(child.as_slice(), config.masks()),
         );
 
         let child_key = SBCKey {
