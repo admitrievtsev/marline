@@ -1,0 +1,6 @@
+[package]
+name = "marline_metrics"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
