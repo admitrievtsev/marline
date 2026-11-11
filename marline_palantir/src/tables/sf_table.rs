@@ -1,5 +1,5 @@
 use crate::types::{BlockID, SuperFeature};
-use chunkfs::ChunkHash;
+use marline_storage::ChunkHash;
 use marline_index::heuristic_index::{HeuristicInvertedSketchIndex, SearchConfig};
 use marline_index::index::metrics::{Metric, MetricStorage, MetricsMap};
 use marline_index::index::store::{IndexStorage, InvertedStorage, Store};

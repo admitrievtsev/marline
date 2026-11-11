@@ -8,8 +8,9 @@ sha2 = "0.10"
 fasthash.workspace = true
 thiserror.workspace = true
 log.workspace = true
-chunkfs = { workspace = true, features = ["chunkers", "hashers"] }
 rand.workspace = true
+marline_cdc = {path = "../marline_cdc"}
+marline_storage = {path = "../marline_storage"}
 marline_sketcher = {path = "../marline_sketcher"}
 marline_scrub = {path = "../marline_scrub"}
 marline_index = {path = "../marline_index"}

@@ -1,0 +1,7 @@
+[package]
+name = "marline_cdc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+blake3 = "1.8.5"

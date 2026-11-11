@@ -1,4 +1,4 @@
-use chunkfs::ChunkHash;
+use marline_storage::ChunkHash;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BlockID<H: ChunkHash> {

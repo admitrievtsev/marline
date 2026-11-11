@@ -1,7 +1,5 @@
-use chunkfs::{
-    ChunkHash, Data, DataContainer, Database, IterableDatabase, Scrub, ScrubMeasurements,
-};
 use marline_scrub::decoder::{Decoder, GdeltaDecoder};
+use marline_storage::{ChunkHash, Data, DataContainer,Database, InMemoryDatabase};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::io;
@@ -9,7 +7,6 @@ use std::io;
 use crate::encoder::PalantirEncoder;
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
-use crate::mock_rocksdb::{Entry, MockRocksDBMap};
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, Chunk, TierConfig};
 use marline_index::heuristic_index::SearchConfig;
@@ -26,6 +23,14 @@ use marline_index::index::IndexError;
 /// that tracks a running average.
 ///
 /// [`SuperFeatureGenerator`]: crate::types::SuperFeatureGenerator
+
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct ScrubMeasurements {
+    pub processed_data: usize,
+    pub data_left: usize,
+}
+
+
 pub struct PalantirScrubber<
     S,
     H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static,
@@ -46,7 +51,7 @@ pub struct PalantirScrubber<
     delta_stored: u64,
     /// Tracks chunk hash → base hash for stored deltas (chain rebuild).
     delta_bases: HashMap<H, H>,
-    manifest_base: MockRocksDBMap,
+    manifest_base: InMemoryDatabase<[u8; 32], Vec<u8>>,
 }
 
 impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: usize>
@@ -83,7 +88,7 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
-            manifest_base: MockRocksDBMap::new(),
+            manifest_base: InMemoryDatabase::new(),
         }
     }
 
@@ -108,26 +113,19 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
     }
 }
 
-impl<B, S, E, const N: usize> Scrub<[u8; 32], B, [u8; 32], HashMap<[u8; 32], Vec<u8>>>
-    for PalantirScrubber<S, [u8; 32], E, N>
-where
-    B: IterableDatabase<[u8; 32], DataContainer<[u8; 32]>>,
-    S: SuperFeatureGenerator,
-    E: PalantirEncoder,
+impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize>
+        PalantirScrubber<S, [u8; 32], E, N>
 {
-    fn scrub<'a>(
+    pub fn scrub(
         &mut self,
-        database: &mut B,
+        database: &mut HashMap<[u8; 32], DataContainer<[u8; 32]>>,
         target_map: &mut HashMap<[u8; 32], Vec<u8>>,
-    ) -> io::Result<ScrubMeasurements>
-    where
-        [u8; 32]: 'a,
-    {
-        let start = std::time::Instant::now();
+    ) -> io::Result<ScrubMeasurements> {
+
         let mut processed_data = 0;
         let data_left = 0;
 
-        for (hash, container) in database.iterator_mut() {
+        for (hash, container) in database.iter_mut() {
             match container.extract() {
                 Data::Chunk(chunk_data) => {
                     let chunk = Chunk::new(chunk_data.clone());
@@ -143,7 +141,7 @@ where
                                         &base_hash.hash,
                                     ) {
                                         (base_chunk, None) => {
-                                            let delta = self.encoder.encode(chunk_data, base_chunk);
+                                            let delta = self.encoder.encode(&chunk_data, base_chunk);
                                             let delta_compressed = delta.clone();
                                             let simple_compressed = delta.clone();
                                             let _ratio = delta_compressed.len() as f64
@@ -155,7 +153,7 @@ where
                                         }
                                         (base_chunk, Some(manifest)) => {
                                             let delta = self.encoder.encode_with_manifest(
-                                                chunk_data, base_chunk, manifest,
+                                                &chunk_data, base_chunk, manifest,
                                             );
                                             let delta_compressed =
                                                 zstd::encode_all(delta.as_slice(), 0)?;
@@ -170,10 +168,7 @@ where
                                                 self.delta_stored += 1;
                                             } else {
                                                 target_map.insert(*hash, chunk_data.clone());
-                                                let _ = &mut self.manifest_base.insert(
-                                                    *hash,
-                                                    Entry::from(chunk_data.clone()),
-                                                )?;
+                                                self.manifest_base.insert(*hash, chunk_data.clone());
                                             }
                                         }
                                     }
@@ -181,11 +176,9 @@ where
                                 }
                                 None => {
                                     // let fp_table = E::generate_fp_table(&chunk.as_bytes());
-                                    let fp_table = None;
+                                    // let fp_table = None;
                                     target_map.insert(*hash, chunk_data.clone());
-                                    let _ = &self
-                                        .manifest_base
-                                        .insert(*hash, Entry::new(fp_table, chunk_data.clone()))?;
+                                    self.manifest_base.insert(*hash, chunk_data.clone());
                                     processed_data += chunk_data.len();
                                 }
                             }
@@ -206,16 +199,29 @@ where
 
         Ok(ScrubMeasurements {
             processed_data,
-            running_time: start.elapsed(),
             data_left,
-            clusterization_report: None,
         })
     }
 }
 
+
+pub(crate) fn get_manifest<'a>(
+    manifest_base: &'a InMemoryDatabase<[u8; 32], Vec<u8>>,
+    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
+    hash: &[u8; 32],
+) -> (&'a Vec<u8>, Option<&'a HashMap<u64, u32>>) {
+    let mut cur = *hash;
+    while let Some(&base) = delta_bases.get(&cur) {
+        cur = base;
+    }
+
+    let base_chunk = manifest_base.get_ref(&cur).unwrap();
+    (base_chunk, None)
+}
+
 #[allow(dead_code)]
 fn decoder(
-    target_map: &MockRocksDBMap,
+    target_map: &InMemoryDatabase<[u8; 32], Vec<u8>>,
     delta_bases: &HashMap<[u8; 32], [u8; 32]>,
     hash: &[u8; 32],
 ) -> io::Result<Vec<u8>> {
@@ -225,42 +231,15 @@ fn decoder(
         chain.push(cur);
         cur = base;
     }
-    let mut data = target_map.get(&cur)?.get_data().clone();
+    let mut data = target_map
+        .get(&cur)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "key not found"))?;
     for &dh in chain.iter().rev() {
-        let compressed = target_map.get_2(&dh).unwrap().get_data();
+        let compressed = target_map
+            .get_ref(&dh)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "delta not found"))?;
         data = GdeltaDecoder::new(true).decode_chunk(data, compressed);
     }
     Ok(data)
 }
 
-pub(crate) fn get_manifest<'a>(
-    target_map: &'a MockRocksDBMap,
-    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
-    hash: &[u8; 32],
-) -> (&'a Vec<u8>, &'a Option<HashMap<u64, u32>>) {
-    let mut chain = Vec::new();
-    let mut cur = *hash;
-    while let Some(&base) = delta_bases.get(&cur) {
-        chain.push(cur);
-        cur = base;
-    }
-
-    let base_chunk = target_map.get_2(&cur).unwrap().get_data();
-    let manifest = target_map.get_2(&cur).unwrap().get_manifest();
-    (base_chunk, manifest)
-}
-
-pub(crate) fn get_entry<'a>(
-    target_map: &'a mut MockRocksDBMap,
-    delta_bases: &HashMap<[u8; 32], [u8; 32]>,
-    hash: &[u8; 32],
-) -> &'a mut Entry {
-    let mut chain = Vec::new();
-    let mut cur = *hash;
-    while let Some(&base) = delta_bases.get(&cur) {
-        chain.push(cur);
-        cur = base;
-    }
-
-    target_map.get_2_mut(&cur).unwrap()
-}

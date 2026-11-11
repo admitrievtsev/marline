@@ -1,4 +1,5 @@
-use chunkfs::{Database, IterableDatabase};
+#![allow(dead_code, unused_imports, unused_variables)]
+use marline_storage::{Database, IterableDatabase};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::io;
@@ -46,41 +47,41 @@ impl MockRocksDBMap {
     }
 }
 
-impl Database<[u8; 32], Entry> for MockRocksDBMap {
-    fn insert(&mut self, key: [u8; 32], value: Entry) -> io::Result<()> {
-        self.insert_count.set(self.insert_count.get() + 1);
-        self.inner.insert(key, value);
-        Ok(())
-    }
+// impl Database<[u8; 32], Entry> for MockRocksDBMap {
+//     fn insert(&mut self, key: [u8; 32], value: Entry) -> io::Result<()> {
+//         self.insert_count.set(self.insert_count.get() + 1);
+//         self.inner.insert(key, value);
+//         Ok(())
+//     }
 
-    fn get(&self, key: &[u8; 32]) -> io::Result<Entry> {
-        self.get_count.set(self.get_count.get() + 1);
-        self.inner
-            .get(key)
-            .cloned()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "key not found"))
-    }
+//     fn get(&self, key: &[u8; 32]) -> io::Result<Entry> {
+//         self.get_count.set(self.get_count.get() + 1);
+//         self.inner
+//             .get(key)
+//             .cloned()
+//             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "key not found"))
+//     }
 
-    fn contains(&self, key: &[u8; 32]) -> bool {
-        self.inner.contains_key(key)
-    }
-}
+//     fn contains(&self, key: &[u8; 32]) -> bool {
+//         self.inner.contains_key(key)
+//     }
+// }
 
-impl IterableDatabase<[u8; 32], Entry> for MockRocksDBMap {
-    fn iterator(&self) -> Box<dyn Iterator<Item = (&[u8; 32], &Entry)> + '_> {
-        Box::new(self.inner.iter())
-    }
+// impl IterableDatabase<[u8; 32], Entry> for MockRocksDBMap {
+//     fn iterator(&self) -> Box<dyn Iterator<Item = (&[u8; 32], &Entry)> + '_> {
+//         Box::new(self.inner.iter())
+//     }
 
-    fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&[u8; 32], &mut Entry)> + '_> {
-        Box::new(self.inner.iter_mut())
-    }
+//     fn iterator_mut(&mut self) -> Box<dyn Iterator<Item = (&[u8; 32], &mut Entry)> + '_> {
+//         Box::new(self.inner.iter_mut())
+//     }
 
-    fn clear(&mut self) -> io::Result<()> {
-        self.clear_count.set(self.clear_count.get() + 1);
-        self.inner.clear();
-        Ok(())
-    }
-}
+//     fn clear(&mut self) -> io::Result<()> {
+//         self.clear_count.set(self.clear_count.get() + 1);
+//         self.inner.clear();
+//         Ok(())
+//     }
+// }
 
 impl Default for MockRocksDBMap {
     fn default() -> Self {
