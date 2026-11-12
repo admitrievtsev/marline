@@ -10,12 +10,13 @@ thiserror.workspace = true
 log.workspace = true
 chunkfs = { workspace = true, features = ["chunkers", "hashers"] }
 rand.workspace = true
+marline_cdc = {path = "../marline_cdc"}
 marline_sketcher = {path = "../marline_sketcher"}
 marline_scrub = {path = "../marline_scrub"}
 marline_index = {path = "../marline_index"}
 zstd.workspace = true
 num = "0.4"
-blake3 = "1.8.5"
+blake3.workspace = true
 
 [[bin]]
 name = "palantir_metrics"

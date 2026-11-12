@@ -509,7 +509,7 @@ pub struct Chunk {
 ///
 /// ```no_run
 /// use std::fs;
-/// use marline_palantir::fastcdc;
+/// use marline_cdc::fastcdc;
 /// let contents = fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = fastcdc::FastCDC::new(&contents, 8192, 16384, 65535);
 /// for (chunk, _features) in chunker {
@@ -720,7 +720,7 @@ pub struct ChunkData {
 ///
 /// ```no_run
 /// # use std::fs::File;
-/// use marline_palantir::fastcdc::StreamCDC;
+/// use marline_cdc::fastcdc::StreamCDC;
 /// let source = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/test/fixtures/SekienAkashita.jpg")).unwrap();
 /// let chunker = StreamCDC::new(source, 4096, 16384, 65535);
 /// for result in chunker {
@@ -864,7 +864,7 @@ impl<R: Read> StreamCDC<R> {
         if self.length == 0 {
             Err(Error::Empty)
         } else {
-            let (hash, count, _) = cut_gear(
+            let (hash, count, features) = cut_gear(
                 &self.buffer[..self.length],
                 self.min_size,
                 self.avg_size,
@@ -882,8 +882,7 @@ impl<R: Read> StreamCDC<R> {
                 let offset = self.processed;
                 self.processed += count as u64;
                 let data = self.drain_bytes(count)?;
-                let rf = [0; 12];
-                Ok((ChunkData { hash, offset, length: count, data }, rf))
+                Ok((ChunkData { hash, offset, length: count, data }, features))
             }
         }
     }
