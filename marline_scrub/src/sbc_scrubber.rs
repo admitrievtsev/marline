@@ -341,7 +341,7 @@ where
             });
         });
         let time_hashing = time_start.elapsed().as_secs_f64();
-        print!("HashTime: {time_hashing:.4};");
+        eprintln!("HashTime: {time_hashing:.4};");
 
         // 2. Clustering: group chunks by similarity
         let time_clusterize_start = time_start.elapsed();
@@ -349,13 +349,13 @@ where
             self.clusterer.clusterize(sbc_hash_chunk.into_inner().unwrap());
         let time_clusterize =
             time_start.elapsed().as_secs_f64() - time_clusterize_start.as_secs_f64();
-        print!("ClusterTime: {time_clusterize:.4};");
+        eprintln!("ClusterTime: {time_clusterize:.4};");
 
         // 3. Encoding: encode clusters and store in target map
         let time_encode_start = time_start.elapsed();
         let (data_left, processed_data) = self.encoder.encode_clusters(&mut clusters, target_map);
         let time_encode = time_start.elapsed().as_secs_f64() - time_encode_start.as_secs_f64();
-        print!("EncodeTime: {time_encode:.4};");
+        eprintln!("EncodeTime: {time_encode:.4};");
 
         let running_time = time_start.elapsed();
 

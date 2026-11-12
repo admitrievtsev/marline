@@ -129,13 +129,18 @@ fn run_metrics(
     };
 
     println!(
-        "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
-        name, cdc_ratio, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
+        "{:<50} {:>10.4} {:>12.4} {:>12.3} {:>12.3} {:>10.2} {:>10.2}",
+        name,
+        cdc_ratio,
+        total_ratio,
+        stored_mb,
+        orig_mb,
+        elapsed.as_secs_f64(),
+        mbps,
     );
 }
 
-#[allow(dead_code)]
-fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
+fn run_sbc(name: &str, kernel_dirs: &[std::path::PathBuf]) {
     let encoder = GdeltaEncoder {};
     let sf_gen = PalantirHasher::new(7, vec![2, 3, 4]);
     let mut online_sbc = PalantirOnline::new(
@@ -146,20 +151,24 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
         Default::default(),
     );
 
-    let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
-    let mut aged_files = vec![];
-    for files in kernel_files {
-        // println!("{}", files.len());
-        let mut a = vec![];
-        for data in files {
-            a.extend_from_slice(data);
-        }
-        aged_files.push(a);
-    }
+    // Stream kernels one at a time: read a kernel dir, concatenate it, write it,
+    // then drop the buffers. Keeping all kernels resident at once (~5 GiB for the
+    // current 9-version chain) is what used to blow past available RAM.
+    let mut original_total: usize = 0;
     let start = Instant::now();
-    println!("Files to write: {}", aged_files.len());
-    for file in aged_files {
-        online_sbc.write(&file).unwrap();
+    for dir in kernel_dirs {
+        let mut files = Vec::new();
+        collect_files(dir, &mut files);
+        original_total += files.iter().map(Vec::len).sum::<usize>();
+
+        let mut aged = Vec::new();
+        for data in &files {
+            aged.extend_from_slice(data);
+        }
+        drop(files); // free per-file buffers before write holds the concat
+
+        online_sbc.write(&aged).unwrap();
+        drop(aged); // free the concat buffer once the chunks have been copied out
     }
 
     let elapsed = start.elapsed();
@@ -175,16 +184,32 @@ fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
     };
 
     println!(
-        "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
-        name, 1.0f64, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
+        "{:<50} {:>10.4} {:>12.4} {:>12.3} {:>12.3} {:>10.2} {:>10.2}",
+        name,
+        1.0f64,
+        total_ratio,
+        stored_mb,
+        orig_mb,
+        elapsed.as_secs_f64(),
+        mbps,
     );
 }
 
 fn ensure_datasets() -> Vec<std::path::PathBuf> {
-    const KERNEL_VERSIONS: [&str; 5] =
-        //   ["linux-3.4.5", "linux-3.4.6", "linux-3.4.7", "linux-3.4.8", "linux-3.4.9"];
-        //       ["linux-3.4.5", "linux-3.5.6", "linux-3.6.7", "linux-3.7.8", "linux-3.8.9"];
-        ["linux-3.4.5", "linux-3.6.6", "linux-3.8.7", "linux-3.10.8", "linux-3.12.9"];
+    const KERNEL_VERSIONS: [&str; 9] = [
+        // Group A: the 3.x incremental chain, including the 3.4.5 -> 3.4.6
+        // micro-increment and the final releases of the 3.x line.
+        "linux-3.4.5",
+        "linux-3.4.6",
+        "linux-3.6.6",
+        "linux-3.8.7",
+        "linux-3.10.8",
+        "linux-3.12.9",
+        "linux-3.14.79",
+        "linux-3.16.85",
+        // Group B: a single 4.x release for the epoch jump.
+        "linux-4.4.302",
+    ];
 
     let base = match std::env::var_os("MARLINE_DATA_DIR") {
         Some(v) => std::path::PathBuf::from(v),
@@ -220,7 +245,9 @@ fn ensure_datasets() -> Vec<std::path::PathBuf> {
 }
 
 fn download_kernel(version: &str, base: &std::path::Path) {
-    let url = format!("https://cdn.kernel.org/pub/linux/kernel/v3.x/{}.tar.xz", version);
+    // kernel.org directories are per major version: v3.x/, v4.x/, v5.x/...
+    let major = version.strip_prefix("linux-").and_then(|v| v.split('.').next()).unwrap_or("3");
+    let url = format!("https://cdn.kernel.org/pub/linux/kernel/v{major}.x/{version}.tar.xz");
     let archive = base.join(format!("{}.tar.xz", version));
 
     // try curl, then wget
@@ -269,23 +296,23 @@ fn download_kernel(version: &str, base: &std::path::Path) {
 fn main() {
     let kernel_dirs = ensure_datasets();
 
-    let mut kernel_files: Vec<Vec<Vec<u8>>> = Vec::new();
+    // Report dataset sizes without keeping file contents in memory: only counts
+    // and byte totals, then drop the buffers.
     for dir in &kernel_dirs {
         let mut files = Vec::new();
-        collect_files(Path::new(dir), &mut files);
+        collect_files(dir, &mut files);
         eprintln!(
             "  {}: {} files, {:.2} MB",
             dir.display(),
             files.len(),
             files.iter().map(|d| d.len()).sum::<usize>() as f64 / (1024.0 * 1024.0)
         );
-
-        kernel_files.push(files);
+        drop(files);
     }
 
     println!(
-        "{:<20} {:<30} {:<12} {:<21} {:<21} {:<21} {:<12}",
-        "tier", "search_cfg", "cdc_ratio", "total_dedup", "stored_mb", "orig_mb", "mbps"
+        "{:<50} {:>10} {:>12} {:>12} {:>12} {:>10} {:>10}",
+        "tier | search_cfg", "cdc", "total_dedup", "stored_mb", "orig_mb", "elapsed_s", "mbps"
     );
 
     for cfg in configs() {
@@ -298,24 +325,7 @@ fn main() {
 
             let name = format!("{} | {}", cfg.name, fmt_sc(&sc));
 
-            match cfg.tier_list.len() {
-                1 => {
-                    run_sbc(&name, &kernel_files);
-                }
-                2 => {
-                    run_sbc(&name, &kernel_files);
-                }
-                3 => {
-                    run_sbc(&name, &kernel_files);
-                }
-                4 => {
-                    run_sbc(&name, &kernel_files);
-                }
-                5 => {
-                    run_sbc(&name, &kernel_files);
-                }
-                _ => unreachable!(),
-            }
+            run_sbc(&name, &kernel_dirs);
         }
     }
 }

@@ -40,8 +40,21 @@ fn main() {
         }
     };
 
-    let scenario1 = ["linux-3.4.5", "linux-3.6.6"];
-    let scenario2 = ["linux-3.10.8"];
+    // Group A: incremental chain of 3.x releases written into one PalantirOnline
+    // instance. linux-3.4.6 is the micro-increment to linux-3.4.5 (a patch-level
+    // delta), and the tail completes the 3.x line to its final releases.
+    let scenario1 = [
+        "linux-3.4.5",
+        "linux-3.4.6",
+        "linux-3.6.6",
+        "linux-3.8.7",
+        "linux-3.10.8",
+        "linux-3.12.9",
+        "linux-3.14.79",
+        "linux-3.16.85",
+    ];
+    // Group B: an epoch jump to the 4.x line.
+    let scenario2 = ["linux-4.4.302"];
 
     let mut kernels: Vec<(&str, &str)> = Vec::new();
     for k in &scenario1 {
