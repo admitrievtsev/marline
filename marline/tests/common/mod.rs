@@ -8,44 +8,85 @@
 
 /// Corpus options.
 ///
-/// Fields are public because this module is included by several integration
-/// test crates (`e2e_sbc.rs`, `e2e_palantir.rs`) via `mod common;`, and each
-/// `tests/*.rs` file is compiled as its own crate.
-#[derive(Clone, Debug, PartialEq)]
+/// Fields are private so the generator invariants (non-zero sizes, a bounded
+/// mutation fraction) cannot be broken after construction; build a validated
+/// instance with [`Options::new`].
+#[derive(Clone, PartialEq)]
 pub struct Options {
     /// Number of logical documents (groups of similar content).
-    pub docs: usize,
+    docs: usize,
     /// Versions per group, including the base.
-    pub versions: usize,
+    versions: usize,
     /// Base document size in bytes.
-    pub size: usize,
+    size: usize,
     /// Fraction of bytes edited in versions (0.0..=1.0).
-    pub mutate_fraction: f64,
+    mutate_fraction: f64,
     /// Whether to include boundary sizes (empty, 1 byte, ~16K/32K).
-    pub edge_cases: bool,
+    edge_cases: bool,
+}
+
+impl Options {
+    /// Builds validated options.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `docs` or `versions` is zero, if `size` is zero, or if
+    /// `mutate_fraction` is not a finite value in `0.0..=1.0`.
+    pub fn new(
+        docs: usize,
+        versions: usize,
+        size: usize,
+        mutate_fraction: f64,
+        edge_cases: bool,
+    ) -> Self {
+        assert!(docs > 0, "docs must be > 0");
+        assert!(versions > 0, "versions must be > 0");
+        assert!(size > 0, "size must be > 0");
+        assert!(
+            mutate_fraction.is_finite() && (0.0..=1.0).contains(&mutate_fraction),
+            "mutate_fraction must be finite and within 0.0..=1.0"
+        );
+        Self { docs, versions, size, mutate_fraction, edge_cases }
+    }
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { docs: 4, versions: 4, size: 256 * 1024, mutate_fraction: 0.03, edge_cases: true }
+        Self::new(4, 4, 256 * 1024, 0.03, true)
     }
 }
 
 /// A ready-to-use corpus.
 ///
-/// Fields are public so the integration test crates (see `Options`) can read
-/// out the different document classes.
-#[derive(Clone, Debug, PartialEq)]
+/// Fields are private; the document classes are exposed through the accessor
+/// methods below.
+#[derive(Clone, PartialEq)]
 pub struct Corpus {
     /// Groups of similar documents: the first element is the base, the rest are versions.
-    pub similar_groups: Vec<Vec<Vec<u8>>>,
+    similar_groups: Vec<Vec<Vec<u8>>>,
     /// Unrelated documents (must not form pairs).
-    pub unrelated: Vec<Vec<u8>>,
+    unrelated: Vec<Vec<u8>>,
     /// Boundary sizes.
-    pub edge_cases: Vec<Vec<u8>>,
+    edge_cases: Vec<Vec<u8>>,
 }
 
 impl Corpus {
+    /// Groups of similar documents: the first element is the base, the rest
+    /// are versions.
+    pub fn similar_groups(&self) -> &[Vec<Vec<u8>>] {
+        &self.similar_groups
+    }
+
+    /// Unrelated documents (must not form pairs).
+    pub fn unrelated(&self) -> &[Vec<u8>] {
+        &self.unrelated
+    }
+
+    /// Boundary-size documents.
+    pub fn edge_cases(&self) -> &[Vec<u8>] {
+        &self.edge_cases
+    }
+
     /// Total size of all documents.
     pub fn total_bytes(&self) -> usize {
         self.similar_groups
@@ -58,14 +99,14 @@ impl Corpus {
     }
 
     /// All documents flattened (order is stable for a given seed).
-    pub fn all(&self) -> Vec<Vec<u8>> {
-        let mut all = Vec::new();
-        for group in &self.similar_groups {
-            all.extend(group.iter().cloned());
-        }
-        all.extend(self.unrelated.iter().cloned());
-        all.extend(self.edge_cases.iter().cloned());
-        all
+    pub fn all(&self) -> Vec<&[u8]> {
+        self.similar_groups
+            .iter()
+            .flatten()
+            .chain(&self.unrelated)
+            .chain(&self.edge_cases)
+            .map(Vec::as_slice)
+            .collect()
     }
 }
 
@@ -190,6 +231,28 @@ pub fn build(seed: u64, opts: &Options) -> Corpus {
     Corpus { similar_groups, unrelated, edge_cases }
 }
 
+/// Prints a small aligned key/value block under a title.
+pub fn report(title: &str, rows: &[(&str, String)]) {
+    eprintln!("==== {title} ====");
+    for (label, value) in rows {
+        eprintln!("  {label:<22} {value}");
+    }
+    eprintln!("--------------------");
+}
+
+/// Formats a byte count with space-separated digit groups for readability.
+pub fn fmt_size(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(' ');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
+}
+
 /// Applies deterministic edits (replace/insert/delete) to the base.
 ///
 /// Edits are confined to a randomly placed contiguous window covering a small
@@ -258,11 +321,11 @@ mod tests {
     #[test]
     fn corpus_has_all_classes() {
         let c = build(7, &Options::default());
-        assert!(!c.similar_groups.is_empty());
-        assert!(!c.unrelated.is_empty());
-        assert!(!c.edge_cases.is_empty());
+        assert!(!c.similar_groups().is_empty());
+        assert!(!c.unrelated().is_empty());
+        assert!(!c.edge_cases().is_empty());
         assert!(c.total_bytes() > 0);
-        let group = &c.similar_groups[0];
+        let group = &c.similar_groups()[0];
         assert!(group.len() >= 2);
         assert!(group[0] != group[1], "a version must differ from its base");
     }

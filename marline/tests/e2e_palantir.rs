@@ -12,7 +12,7 @@ mod common;
 
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{DataContainer, Hasher, Scrub};
-use common::{build, Options};
+use common::{build, fmt_size, report, Options};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
 use marline_palantir::lifecycle_manager::LifecycleManager;
@@ -24,28 +24,6 @@ use std::collections::HashMap;
 
 type Hash = [u8; 32];
 type TargetMap = HashMap<Hash, Vec<u8>>;
-
-/// Prints a small aligned key/value block under a title.
-fn report(title: &str, rows: &[(&str, String)]) {
-    eprintln!("==== {title} ====");
-    for (label, value) in rows {
-        eprintln!("  {label:<22} {value}");
-    }
-    eprintln!("--------------------");
-}
-
-/// Formats a byte count with space-separated digit groups for readability.
-fn fmt_size(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
-}
 
 fn hash_data(data: &[u8]) -> Hash {
     Sha256Hasher::default().hash(data)
@@ -110,7 +88,7 @@ fn decode_from_target(
 #[test]
 fn similar_group_stores_versions_as_recoverable_deltas() {
     let corpus = build(42, &Options::default());
-    let group = &corpus.similar_groups[0];
+    let group = &corpus.similar_groups()[0];
     let base = &group[0];
     let versions = &group[1..];
 
@@ -120,10 +98,7 @@ fn similar_group_stores_versions_as_recoverable_deltas() {
 
     // Base goes in first, stored raw.
     store_doc(&mut scrubber, &mut target_map, base);
-    assert!(
-        !scrubber.delta_bases().contains_key(&base_hash),
-        "base chunk must be stored raw"
-    );
+    assert!(!scrubber.delta_bases().contains_key(&base_hash), "base chunk must be stored raw");
 
     let mut deltas = 0;
     for version in versions {
@@ -149,8 +124,7 @@ fn similar_group_stores_versions_as_recoverable_deltas() {
         ok += 1;
     }
 
-    let delta_bytes: usize =
-        versions.iter().map(|v| target_map[&hash_data(v)].len()).sum();
+    let delta_bytes: usize = versions.iter().map(|v| target_map[&hash_data(v)].len()).sum();
     let orig_bytes: usize = versions.iter().map(|v| v.len()).sum();
     let saving = 100.0 * (1.0 - delta_bytes as f64 / orig_bytes as f64);
     report(
@@ -174,7 +148,7 @@ fn unrelated_documents_are_stored_raw_and_roundtrip() {
     let mut target_map: TargetMap = HashMap::new();
 
     let mut stored_bytes: usize = 0;
-    for doc in &corpus.unrelated {
+    for doc in corpus.unrelated() {
         let hash = hash_data(doc);
         store_doc(&mut scrubber, &mut target_map, doc);
         stored_bytes += doc.len();
@@ -189,7 +163,7 @@ fn unrelated_documents_are_stored_raw_and_roundtrip() {
     report(
         "Palantir — unrelated documents",
         &[
-            ("docs", corpus.unrelated.len().to_string()),
+            ("docs", corpus.unrelated().len().to_string()),
             ("stored raw bytes", fmt_size(stored_bytes)),
             ("deltas", scrubber.delta_stored().to_string()),
         ],
@@ -198,7 +172,7 @@ fn unrelated_documents_are_stored_raw_and_roundtrip() {
 
 #[test]
 fn mixed_corpus_roundtrips_end_to_end() {
-    let opts = Options { edge_cases: false, ..Options::default() };
+    let opts = Options::new(4, 4, 256 * 1024, 0.03, false);
     let corpus = build(42, &opts);
     let docs = corpus.all();
     let mut scrubber = make_scrubber();
@@ -214,7 +188,7 @@ fn mixed_corpus_roundtrips_end_to_end() {
     for (i, doc) in docs.iter().enumerate() {
         let hash = hash_data(doc);
         let decoded = decode_from_target(&scrubber, &target_map, hash);
-        if &decoded != doc {
+        if decoded.as_slice() != *doc {
             panic!(
                 "doc {i} ({} bytes, in delta_bases: {}) failed to round-trip: got {} bytes",
                 doc.len(),
@@ -224,7 +198,7 @@ fn mixed_corpus_roundtrips_end_to_end() {
         }
     }
 
-    let total_bytes: usize = docs.iter().map(Vec::len).sum();
+    let total_bytes: usize = docs.iter().map(|doc| doc.len()).sum();
     report(
         "Palantir — mixed corpus round-trip",
         &[

@@ -7,7 +7,7 @@ mod common;
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{DataContainer, FileSystem};
-use common::{build, Options};
+use common::{build, fmt_size, report, Options};
 use marline_scrub::clusterer::EqClusterer;
 use marline_scrub::decoder::GdeltaDecoder;
 use marline_scrub::encoder::GdeltaEncoder;
@@ -43,9 +43,9 @@ fn make_fs() -> FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder,
 /// read-back can be verified per file.
 fn write_all(
     fs: &mut FileSystem<ChunkDb, [u8; 32], SketcherKey, SBCMap<GdeltaDecoder, SpeedSketchHash>>,
-    documents: &[Vec<u8>],
+    documents: &[&[u8]],
 ) -> Vec<Vec<u8>> {
-    let origins: Vec<Vec<u8>> = documents.to_vec();
+    let origins: Vec<Vec<u8>> = documents.iter().map(|doc| doc.to_vec()).collect();
     for (i, doc) in documents.iter().enumerate() {
         let mut handle = fs
             .create_file(
@@ -70,28 +70,6 @@ fn read_all(
             fs.read_file_complete(&handle).unwrap()
         })
         .collect()
-}
-
-/// Prints a small aligned key/value block under a title.
-fn report(title: &str, rows: &[(&str, String)]) {
-    eprintln!("==== {title} ====");
-    for (label, value) in rows {
-        eprintln!("  {label:<22} {value}");
-    }
-    eprintln!("--------------------");
-}
-
-/// Formats a byte count with space-separated digit groups for readability.
-fn fmt_size(n: usize) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, ch) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
 }
 
 #[test]
@@ -122,12 +100,13 @@ fn full_corpus_survives_scrub_roundtrip() {
         "SBC total ratio must not regress relative to CDC: total={total}, cdc={cdc}"
     );
 
-    let total_bytes: usize = docs.iter().map(Vec::len).sum();
+    let total_bytes: usize = docs.iter().map(|doc| doc.len()).sum();
     let cluster_report = measurements
         .clusterization_report
         .as_ref()
         .map(|c| c.number_of_clusters)
         .unwrap_or_default();
+
     report(
         "SBC — full corpus round-trip",
         &[
@@ -154,7 +133,7 @@ fn read_file(
 #[test]
 fn edge_case_documents_roundtrip() {
     let corpus = build(7, &Options::default());
-    let edge: Vec<u8> = corpus.edge_cases.concat();
+    let edge: Vec<u8> = corpus.edge_cases().concat();
 
     let mut fs = make_fs();
     let mut handle = fs
