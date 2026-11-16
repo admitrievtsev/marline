@@ -75,7 +75,7 @@ fn main() {
             let sf_gen = PalantirHasher::new(7, TIERS.to_vec());
             let mut online = PalantirOnline::new(
                 sf_gen,
-                GdeltaEncoder {},
+                GdeltaEncoder,
                 TierConfig::new(TIERS),
                 LifecycleManager::<3>::default_configs(),
                 Default::default(),

@@ -1,4 +1,4 @@
-use crate::encoder::PalantirEncoder;
+use crate::encoder::Encoder;
 use crate::error::PalantirError;
 use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
@@ -31,7 +31,7 @@ pub trait OnlineSBC<
 pub struct PalantirOnline<
     S,
     H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
-    E: PalantirEncoder,
+    E: Encoder,
     const N: usize,
 > {
     sf_gen: S,
@@ -55,7 +55,7 @@ pub struct PalantirOnline<
 }
 
 #[allow(unused_variables)]
-impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
+impl<S: SuperFeatureGenerator, E: Encoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
@@ -121,7 +121,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                 }
                                 None => {
                                     /*
-                                    let fp_table = E::generate_fp_table(&data);
+                                    let fp_table = self.encoder.generate_fp_table(&data);
                                     let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
 
                                     let delta = self
@@ -170,12 +170,8 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
     }
 }
 
-impl<
-        S,
-        H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static,
-        E: PalantirEncoder,
-        const N: usize,
-    > PalantirOnline<S, H, E, N>
+impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E: Encoder, const N: usize>
+    PalantirOnline<S, H, E, N>
 {
     /// Creates a new `PalantirScrubber`.
     ///

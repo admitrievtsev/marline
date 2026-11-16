@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::io;
 
-use crate::encoder::PalantirEncoder;
+use crate::encoder::Encoder;
 use crate::lifecycle_manager::LifecycleTierConfig;
 use crate::metadata_manager::MetadataManager;
 use crate::mock_rocksdb::{Entry, MockRocksDBMap};
@@ -113,7 +113,7 @@ impl<B, S, E, const N: usize> Scrub<[u8; 32], B, [u8; 32], HashMap<[u8; 32], Vec
 where
     B: IterableDatabase<[u8; 32], DataContainer<[u8; 32]>>,
     S: SuperFeatureGenerator,
-    E: PalantirEncoder,
+    E: Encoder,
 {
     fn scrub<'a>(
         &mut self,
@@ -144,19 +144,29 @@ where
                                     ) {
                                         (base_chunk, None) => {
                                             let delta = self.encoder.encode(chunk_data, base_chunk);
-                                            let delta_compressed = delta.clone();
-                                            let simple_compressed = delta.clone();
-                                            let _ratio = delta_compressed.len() as f64
+                                            let delta_compressed =
+                                                zstd::encode_all(delta.as_slice(), 0)?;
+                                            let simple_compressed =
+                                                zstd::encode_all(chunk_data.as_slice(), 0)?;
+                                            let ratio = delta_compressed.len() as f64
                                                 / simple_compressed.len() as f64;
-
-                                            let _ = &mut target_map.insert(*hash, delta_compressed);
-                                            self.delta_bases.insert(*hash, *base_hash.hash());
-                                            self.delta_stored += 1;
+                                            if ratio < self.fp_threshold {
+                                                let _ = target_map.insert(*hash, delta_compressed);
+                                                self.delta_bases.insert(*hash, *base_hash.hash());
+                                                self.delta_stored += 1;
+                                            } else {
+                                                let _ =
+                                                    target_map.insert(*hash, chunk_data.clone());
+                                            }
                                         }
                                         (base_chunk, Some(manifest)) => {
-                                            let delta = self.encoder.encode_with_manifest(
-                                                chunk_data, base_chunk, manifest,
-                                            );
+                                            let delta = if manifest.is_empty() {
+                                                self.encoder.encode(chunk_data, base_chunk)
+                                            } else {
+                                                self.encoder.encode_with_manifest(
+                                                    chunk_data, base_chunk, manifest,
+                                                )
+                                            };
                                             let delta_compressed =
                                                 zstd::encode_all(delta.as_slice(), 0)?;
                                             let simple_compressed =
@@ -180,8 +190,7 @@ where
                                     processed_data += chunk_data.len();
                                 }
                                 None => {
-                                    // let fp_table = E::generate_fp_table(&chunk.as_bytes());
-                                    let fp_table = None;
+                                    let fp_table = self.encoder.generate_fp_table(chunk_data);
                                     target_map.insert(*hash, chunk_data.clone());
                                     let _ = &self
                                         .manifest_base

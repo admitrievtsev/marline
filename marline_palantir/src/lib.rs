@@ -15,7 +15,7 @@
 //! 2. **Index lookup** — Super-features are split into fixed-size sketches
 //!    and queried against a multi-tier [`metadata_manager::MetadataManager`].
 //! 3. **Delta encoding** — If a similar base chunk is found, the encoder
-//!    ([`encoder::PalantirEncoder`]) produces a delta; otherwise the raw chunk
+//!    ([`encoder::Encoder`]) produces a delta; otherwise the raw chunk
 //!    is stored.
 //! 4. **Scrubbing** — [`palantir_scrubber::PalantirScrubber`] orchestrates
 //!    the full pipeline (feature generation → lookup → delta-or-store) for
@@ -27,7 +27,7 @@
 //! |--------|-------------|
 //! | [`types`] | Core data types: [`Chunk`], [`SuperFeature`], [`ChunkDigest`], [`TierConfig`] |
 //! | [`sf_generator`] | Feature generation: [`PalantirHasher`] and the [`SuperFeatureGenerator`] trait |
-//! | [`encoder`] | Delta encoding: [`PalantirEncoder`] trait and [`GdeltaEncoder`] |
+//! | [`encoder`] | Delta encoding: [`Encoder`] trait and implementations |
 //! | [`palantir_scrubber`] | Scrubbing pipeline: [`PalantirScrubber`] |
 //! | [`error`] | Error types for the crate |
 //! | [`metadata_manager`] | Metadata management: [`MetadataManager`] — fingerprint and super-feature index |
@@ -54,8 +54,7 @@
 //! [`ChunkDigest`]: types::ChunkDigest
 //! [`TierConfig`]: types::TierConfig
 //! [`PalantirHasher`]: sf_generator::PalantirHasher
-//! [`PalantirEncoder`]: encoder::PalantirEncoder
-//! [`GdeltaEncoder`]: encoder::GdeltaEncoder
+//! [`Encoder`]: encoder::Encoder
 //! [`MetadataManager`]: metadata_manager::MetadataManager
 //! [`PalantirScrubber`]: palantir_scrubber::PalantirScrubber
 //!
