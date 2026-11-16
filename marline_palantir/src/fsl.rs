@@ -97,12 +97,20 @@ const VAR_PARAMS_MAX_OFF: usize = VAR_PARAMS_MIN_OFF + 4;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ChunkRef {
     /// Anonymised chunk digest, widened from the on-disk 48 bits.
-    pub digest: u64,
+    digest: u64,
     /// Chunk length in bytes.
-    pub size: u32,
+    size: u32,
 }
 
 impl ChunkRef {
+    pub fn digest(&self) -> u64 {
+        self.digest
+    }
+
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
     fn key(&self) -> (u64, u32) {
         (self.digest, self.size)
     }
@@ -112,16 +120,32 @@ impl ChunkRef {
 #[derive(Clone, Debug)]
 pub struct FslFile {
     /// Anonymised path, kept only for extension statistics.
-    pub path: Vec<u8>,
+    path: Vec<u8>,
     /// Logical file size in bytes.
-    pub size: u64,
+    size: u64,
     /// Chunks in file order. Empty when the collector recorded no chunks.
-    pub chunks: Vec<ChunkRef>,
+    chunks: Vec<ChunkRef>,
     /// True when the collector stored a non-zero size but no chunk records.
-    pub size_without_chunks: bool,
+    size_without_chunks: bool,
 }
 
 impl FslFile {
+    pub fn path(&self) -> &[u8] {
+        &self.path
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    pub fn chunks(&self) -> &[ChunkRef] {
+        &self.chunks
+    }
+
+    pub fn size_without_chunks(&self) -> bool {
+        self.size_without_chunks
+    }
+
     /// Lowercased extension of the anonymised path, or `None` if it has none.
     pub fn extension(&self) -> Option<String> {
         let name = self.path.rsplit(|&b| b == b'/').next()?;
@@ -137,31 +161,79 @@ impl FslFile {
 /// A parsed FSL snapshot plus the statistics needed to judge a replay.
 #[derive(Clone, Debug)]
 pub struct FslSnapshot {
-    pub files: Vec<FslFile>,
+    files: Vec<FslFile>,
     /// `bytes` field of the header: total logical size claimed by the trace.
-    pub declared_bytes: u64,
+    declared_bytes: u64,
     /// `files` field of the header.
-    pub declared_files: u64,
+    declared_files: u64,
     /// `chunks` field of the header.
-    pub declared_chunks: u64,
+    declared_chunks: u64,
     /// Sum of the sizes of all chunk records actually read.
-    pub sum_chunk_bytes: u64,
+    sum_chunk_bytes: u64,
     /// Sum of the sizes of chunk records that occur exactly once.
-    pub unique_chunk_bytes: u64,
+    unique_chunk_bytes: u64,
     /// Number of distinct `(digest, size)` pairs.
-    pub unique_chunks: u64,
+    unique_chunks: u64,
     /// Chunk records read, including repeats.
-    pub chunks_read: u64,
+    chunks_read: u64,
     /// Files that could not be parsed because the stream ended early.
-    pub truncated_files: u64,
+    truncated_files: u64,
     /// Collector-side chunker bounds, when the trace used variable-size chunking.
-    pub min_chunk: Option<u32>,
-    pub max_chunk: Option<u32>,
+    min_chunk: Option<u32>,
+    max_chunk: Option<u32>,
     /// Digest width in bits (48 for the published `MD5_48BIT_HASH` traces).
-    pub digest_bits: u32,
+    digest_bits: u32,
 }
 
 impl FslSnapshot {
+    pub fn files(&self) -> &[FslFile] {
+        &self.files
+    }
+
+    pub fn declared_bytes(&self) -> u64 {
+        self.declared_bytes
+    }
+
+    pub fn declared_files(&self) -> u64 {
+        self.declared_files
+    }
+
+    pub fn declared_chunks(&self) -> u64 {
+        self.declared_chunks
+    }
+
+    pub fn sum_chunk_bytes(&self) -> u64 {
+        self.sum_chunk_bytes
+    }
+
+    pub fn unique_chunk_bytes(&self) -> u64 {
+        self.unique_chunk_bytes
+    }
+
+    pub fn unique_chunks(&self) -> u64 {
+        self.unique_chunks
+    }
+
+    pub fn chunks_read(&self) -> u64 {
+        self.chunks_read
+    }
+
+    pub fn truncated_files(&self) -> u64 {
+        self.truncated_files
+    }
+
+    pub fn min_chunk(&self) -> Option<u32> {
+        self.min_chunk
+    }
+
+    pub fn max_chunk(&self) -> Option<u32> {
+        self.max_chunk
+    }
+
+    pub fn digest_bits(&self) -> u32 {
+        self.digest_bits
+    }
+
     /// Reads and parses a `.hash.anon` file.
     pub fn parse(path: &Path) -> io::Result<Self> {
         let raw = std::fs::read(path)?;
@@ -450,16 +522,48 @@ pub struct ReplayConfig {
     /// i.e. as a near-duplicate. `0.0` reproduces exact duplicates only, which is
     /// what the trace alone justifies; Palantir can find nothing above CDC in that
     /// case because no two distinct chunks are alike.
-    pub near_dup_rate: f64,
+    near_dup_rate: f64,
     /// Bytes overwritten in each near-duplicate. They are spread evenly across the
     /// file so that several chunks differ from their parent.
-    pub mutation_bytes: usize,
+    mutation_bytes: usize,
     /// Seed for the deterministic content generator and for the injection draw.
-    pub seed: u64,
+    seed: u64,
     /// Stop after this many logical bytes.
-    pub max_bytes: Option<u64>,
+    max_bytes: Option<u64>,
     /// Stop after this many files.
-    pub max_files: Option<usize>,
+    max_files: Option<usize>,
+}
+
+impl ReplayConfig {
+    pub fn new(near_dup_rate: f64, mutation_bytes: usize, seed: u64) -> Self {
+        Self { near_dup_rate, mutation_bytes, seed, max_bytes: None, max_files: None }
+    }
+
+    pub fn with_limits(mut self, max_bytes: Option<u64>, max_files: Option<usize>) -> Self {
+        self.max_bytes = max_bytes;
+        self.max_files = max_files;
+        self
+    }
+
+    pub fn near_dup_rate(&self) -> f64 {
+        self.near_dup_rate
+    }
+
+    pub fn mutation_bytes(&self) -> usize {
+        self.mutation_bytes
+    }
+
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    pub fn max_bytes(&self) -> Option<u64> {
+        self.max_bytes
+    }
+
+    pub fn max_files(&self) -> Option<usize> {
+        self.max_files
+    }
 }
 
 impl Default for ReplayConfig {
@@ -477,25 +581,59 @@ impl Default for ReplayConfig {
 /// What the replay actually produced, for the benchmark report.
 #[derive(Clone, Debug, Default)]
 pub struct ReplayStats {
-    pub files: usize,
-    pub near_dup_files: usize,
-    pub logical_bytes: u64,
+    files: usize,
+    near_dup_files: usize,
+    logical_bytes: u64,
     /// Files dropped because they had no content in the trace and no size either.
-    pub empty_files_skipped: usize,
+    empty_files_skipped: usize,
     /// Files dropped by `max_bytes` / `max_files`.
-    pub files_truncated_by_cap: usize,
+    files_truncated_by_cap: usize,
     /// Digest-width note carried into the report.
-    pub digest_bits: u32,
+    digest_bits: u32,
+}
+
+impl ReplayStats {
+    pub fn files(&self) -> usize {
+        self.files
+    }
+
+    pub fn near_dup_files(&self) -> usize {
+        self.near_dup_files
+    }
+
+    pub fn logical_bytes(&self) -> u64 {
+        self.logical_bytes
+    }
+
+    pub fn empty_files_skipped(&self) -> usize {
+        self.empty_files_skipped
+    }
+
+    pub fn files_truncated_by_cap(&self) -> usize {
+        self.files_truncated_by_cap
+    }
+
+    pub fn digest_bits(&self) -> u32 {
+        self.digest_bits
+    }
 }
 
 /// A replayed corpus: file contents reconstructed from a snapshot.
 #[derive(Clone, Debug, Default)]
 pub struct ReplayCorpus {
-    pub files: Vec<Vec<u8>>,
-    pub stats: ReplayStats,
+    files: Vec<Vec<u8>>,
+    stats: ReplayStats,
 }
 
 impl ReplayCorpus {
+    pub fn files(&self) -> &[Vec<u8>] {
+        &self.files
+    }
+
+    pub fn stats(&self) -> &ReplayStats {
+        &self.stats
+    }
+
     /// Materialises the snapshot as a byte corpus.
     pub fn build(snap: &FslSnapshot, cfg: &ReplayConfig) -> Self {
         let mut rng = Rng::new(cfg.seed);

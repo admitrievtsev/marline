@@ -10,12 +10,16 @@ use super::super_feature::SuperFeature;
 #[derive(Clone)]
 pub struct ChunkDigest {
     /// The set of super-features representing this chunk.
-    pub super_features: Vec<SuperFeature>,
+    super_features: Vec<SuperFeature>,
 }
 
 impl ChunkDigest {
     /// Creates a new `ChunkDigest` from a vector of [`SuperFeature`]s.
     pub fn new(super_features: Vec<SuperFeature>) -> Self {
         Self { super_features }
+    }
+
+    pub fn super_features(&self) -> &[SuperFeature] {
+        &self.super_features
     }
 }

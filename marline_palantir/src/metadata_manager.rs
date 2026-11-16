@@ -26,13 +26,13 @@ impl<H: ChunkHash + Send + Sync, const N: usize> MetadataManager<H, N> {
         lifecycle_configs: [LifecycleTierConfig; N],
         search_config: &SearchConfig,
     ) -> Self {
-        let features_num = if let Some(fn_val) = tier_config.features_num {
+        let features_num = if let Some(fn_val) = tier_config.features_num() {
             fn_val
         } else {
-            lcm_vec(&tier_config.tier_list).expect("tier_list LCM overflow") as usize
+            lcm_vec(tier_config.tier_list()).expect("tier_list LCM overflow") as usize
         };
         let sf_counts: [usize; N] =
-            std::array::from_fn(|i| features_num / tier_config.tier_list[i] as usize);
+            std::array::from_fn(|i| features_num / tier_config.tier_list()[i] as usize);
         let sf_tables: [AnySFTable<H>; N] = std::array::from_fn(|i| {
             AnySFTable::from_index(sf_counts[i] as u32, search_config).expect("Invalid tier index")
         });
