@@ -140,7 +140,7 @@ where
                                     match get_manifest(
                                         &self.manifest_base,
                                         &self.delta_bases,
-                                        &base_hash.hash,
+                                        base_hash.hash(),
                                     ) {
                                         (base_chunk, None) => {
                                             let delta = self.encoder.encode(chunk_data, base_chunk);
@@ -150,7 +150,7 @@ where
                                                 / simple_compressed.len() as f64;
 
                                             let _ = &mut target_map.insert(*hash, delta_compressed);
-                                            self.delta_bases.insert(*hash, base_hash.hash);
+                                            self.delta_bases.insert(*hash, *base_hash.hash());
                                             self.delta_stored += 1;
                                         }
                                         (base_chunk, Some(manifest)) => {
@@ -166,7 +166,7 @@ where
                                             if ratio < self.fp_threshold {
                                                 let _ =
                                                     &mut target_map.insert(*hash, delta_compressed);
-                                                self.delta_bases.insert(*hash, base_hash.hash);
+                                                self.delta_bases.insert(*hash, *base_hash.hash());
                                                 self.delta_stored += 1;
                                             } else {
                                                 target_map.insert(*hash, chunk_data.clone());

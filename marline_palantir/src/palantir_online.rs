@@ -90,7 +90,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                             let entry = get_entry(
                                 &mut self.manifest_base,
                                 &self.delta_bases,
-                                &base_hash.hash,
+                                base_hash.hash(),
                             );
 
                             let data = entry.get_data().to_vec();
@@ -110,7 +110,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                         / simple_compressed.len() as f64;
                                     if ratio < self.fp_threshold {
                                         let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
+                                        self.delta_bases.insert(*hash, *base_hash.hash());
                                         self.delta_stored += 1;
                                     } else {
                                         self.target_map.insert(*hash, chunk_data.clone());
@@ -138,7 +138,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                     let delta_compressed = data;
 
                                     let _ = self.target_map.insert(*hash, delta_compressed);
-                                    self.delta_bases.insert(*hash, base_hash.hash);
+                                    self.delta_bases.insert(*hash, *base_hash.hash());
                                     self.delta_stored += 1;
                                 }
                             }

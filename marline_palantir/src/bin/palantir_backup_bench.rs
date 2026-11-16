@@ -76,7 +76,7 @@ fn main() {
             let mut online = PalantirOnline::new(
                 sf_gen,
                 GdeltaEncoder {},
-                TierConfig { tier_list: TIERS, features_num: None },
+                TierConfig::new(TIERS),
                 LifecycleManager::<3>::default_configs(),
                 Default::default(),
             );
