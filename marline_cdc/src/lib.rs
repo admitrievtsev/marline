@@ -3,8 +3,6 @@
 //! [`ChunkerBuilder`] is the entry point: it validates chunk size parameters and
 //! builds slice ([`FastCDC`]) and streaming ([`StreamCDC`]) chunkers.
 
-// The module stays `pub` only because the doc-tests of the vendored `fastcdc.rs`
-// refer to the `marline_cdc::fastcdc` path; the supported API is the re-exports below.
 #[doc(hidden)]
 pub mod fastcdc;
 
@@ -104,7 +102,15 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    /// A deterministic pseudo-random data generator based on the Xorshift64 algorithm (Marsaglia, 2003).
+    /// Advances a xorshift64 state (Marsaglia, 2003) and returns the new state.
+    fn xorshift64(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
+    /// A deterministic pseudo-random data generator based on [`xorshift64`].
     ///
     /// Used for reproducible CDC (Content-Defined Chunking) testing, without external dependencies such as the `rand` crate.
     /// It generates a byte stream with a period of 2^64 - 1 and a uniform distribution;
@@ -112,14 +118,7 @@ mod tests {
     /// and ensures realistic chunk boundary detection.
     fn generate_test_data(size: usize) -> Vec<u8> {
         let mut state: u64 = 0xDEAD_BEEF_CAFE_BABE;
-        (0..size)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                (state & 0xFF) as u8
-            })
-            .collect()
+        (0..size).map(|_| (xorshift64(&mut state) & 0xFF) as u8).collect()
     }
 
     /// Number of raw features collected per chunk.
@@ -166,15 +165,18 @@ mod tests {
             "Chunk count must match between slice and stream"
         );
 
-        for (i, ((slice_chunk, slice_feat), (stream_chunk, stream_feat))) in
-            slice_chunks.iter().zip(stream_chunks).enumerate()
+        for ((slice_chunk, slice_feat), (stream_chunk, stream_feat)) in
+            slice_chunks.iter().zip(stream_chunks)
         {
             let offset = slice_chunk.offset;
             let length = slice_chunk.length;
 
-            assert_eq!(offset, stream_chunk.offset as usize, "Offset mismatch at chunk {i}");
-            assert_eq!(length, stream_chunk.length, "Length mismatch at chunk {i}");
-            assert_eq!(slice_chunk.hash, stream_chunk.hash, "Hash mismatch at chunk {i}");
+            assert_eq!(
+                offset, stream_chunk.offset as usize,
+                "Offset mismatch for slice chunk at offset {offset}"
+            );
+            assert_eq!(length, stream_chunk.length, "Length mismatch at offset {offset}");
+            assert_eq!(slice_chunk.hash, stream_chunk.hash, "Hash mismatch at offset {offset}");
             assert!(slice_feat == stream_feat, "Extracted features mismatch at offset {offset}");
             assert!(
                 data[offset..offset + length] == stream_chunk.data[..],
@@ -197,10 +199,7 @@ mod tests {
             if remaining.is_empty() || buf.is_empty() {
                 return Ok(0);
             }
-            self.state ^= self.state << 13;
-            self.state ^= self.state >> 7;
-            self.state ^= self.state << 17;
-            let portion = 1 + (self.state % 7) as usize;
+            let portion = 1 + (xorshift64(&mut self.state) % 7) as usize;
             let n = portion.min(buf.len()).min(remaining.len());
             buf[..n].copy_from_slice(&remaining[..n]);
             self.pos += n;
