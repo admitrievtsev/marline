@@ -11,8 +11,7 @@ use std::time::Instant;
 use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, FileSystem, Scrub, ScrubMeasurements};
-use clap::Parser;
-use marline_cli::{Cli, EncoderKind, Regime};
+use marline_cli::{parse_cli, Cli, EncoderKind, Regime};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::{
     DdeltaEncoder, Encoder, GdeltaEncoder, XdeltaEncoder, ZdeltaEncoder,
@@ -92,22 +91,22 @@ fn resolve_tiers(selected: &[String]) -> Result<Vec<TierSpec>, Box<dyn Error>> {
 }
 
 fn build_search_configs(cli: &Cli) -> Vec<SearchConfig> {
-    let mjs: Vec<Option<f64>> = if cli.min_jaccard().is_empty() {
+    let mjs: Vec<Option<f64>> = if cli.min_jaccard.is_empty() {
         vec![None]
     } else {
-        cli.min_jaccard().iter().map(|v| Some(*v)).collect()
+        cli.min_jaccard.iter().map(|v| Some(*v)).collect()
     };
-    let mds: Vec<Option<usize>> = if cli.max_df().is_empty() {
+    let mds: Vec<Option<usize>> = if cli.max_df.is_empty() {
         vec![None]
     } else {
-        cli.max_df().iter().map(|v| Some(*v)).collect()
+        cli.max_df.iter().map(|v| Some(*v)).collect()
     };
     let rfs: Vec<bool> =
-        if cli.rare_first().is_empty() { vec![false] } else { cli.rare_first().to_vec() };
-    let fps: Vec<Option<u8>> = if cli.fp_metric_threshold().is_empty() {
+        if cli.rare_first.is_empty() { vec![false] } else { cli.rare_first.to_vec() };
+    let fps: Vec<Option<u8>> = if cli.fp_metric_threshold.is_empty() {
         vec![None]
     } else {
-        cli.fp_metric_threshold().iter().map(|v| Some(*v)).collect()
+        cli.fp_metric_threshold.iter().map(|v| Some(*v)).collect()
     };
 
     let mut configs = Vec::new();
@@ -139,12 +138,12 @@ struct Case {
 }
 
 fn resolve_cases(cli: &Cli) -> Result<Vec<Case>, Box<dyn Error>> {
-    match cli.regime() {
+    match cli.regime {
         Regime::Regime2 => {
-            let versions: Vec<String> = if cli.versions().is_empty() {
+            let versions: Vec<String> = if cli.versions.is_empty() {
                 ALL_VERSIONS.iter().map(|v| (*v).to_string()).collect()
             } else {
-                cli.versions().to_vec()
+                cli.versions.to_vec()
             };
             let label = if versions.len() == ALL_VERSIONS.len()
                 && versions.iter().zip(ALL_VERSIONS.iter()).all(|(a, b)| a == b)
@@ -156,17 +155,17 @@ fn resolve_cases(cli: &Cli) -> Result<Vec<Case>, Box<dyn Error>> {
             Ok(vec![Case { label, kind: CaseKind::Slices { versions } }])
         }
         Regime::Regime1 => {
-            let windows: Vec<(String, String)> = if !cli.windows().is_empty() {
+            let windows: Vec<(String, String)> = if !cli.windows.is_empty() {
                 let mut parsed = Vec::new();
-                for w in cli.windows() {
+                for w in &cli.windows {
                     let (a, b) = w
                         .split_once(':')
                         .ok_or_else(|| format!("window `{w}` must be of form <a>:<b>"))?;
                     parsed.push((a.to_string(), b.to_string()));
                 }
                 parsed
-            } else if !cli.versions().is_empty() {
-                cli.versions().windows(2).map(|pair| (pair[0].clone(), pair[1].clone())).collect()
+            } else if !cli.versions.is_empty() {
+                cli.versions.windows(2).map(|pair| (pair[0].clone(), pair[1].clone())).collect()
             } else {
                 DEFAULT_WINDOWS.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect()
             };
@@ -181,8 +180,8 @@ fn resolve_cases(cli: &Cli) -> Result<Vec<Case>, Box<dyn Error>> {
 fn materialize(case: &Case, cli: &Cli) -> Result<Vec<(String, PathBuf)>, Box<dyn Error>> {
     match &case.kind {
         CaseKind::Window { a, b } => {
-            if !cli.no_extract() {
-                let script = cli.root().join("extract_to_work.sh");
+            if !cli.no_extract {
+                let script = cli.root.join("extract_to_work.sh");
                 eprintln!("  extract {a} {b} ...");
                 let status = Command::new("bash").arg(&script).arg(a).arg(b).status()?;
                 if !status.success() {
@@ -190,14 +189,14 @@ fn materialize(case: &Case, cli: &Cli) -> Result<Vec<(String, PathBuf)>, Box<dyn
                 }
             }
             let dirs = vec![
-                (a.clone(), cli.root().join("work").join(format!("linux-{a}"))),
-                (b.clone(), cli.root().join("work").join(format!("linux-{b}"))),
+                (a.clone(), cli.root.join("work").join(format!("linux-{a}"))),
+                (b.clone(), cli.root.join("work").join(format!("linux-{b}"))),
             ];
             Ok(dirs)
         }
         CaseKind::Slices { versions } => Ok(versions
             .iter()
-            .map(|v| (v.clone(), cli.root().join("slices").join(format!("linux-{v}"))))
+            .map(|v| (v.clone(), cli.root.join("slices").join(format!("linux-{v}"))))
             .collect()),
     }
 }
@@ -479,7 +478,7 @@ fn build_row(
         CaseKind::Window { a, b } => vec![a.clone(), b.clone()],
         CaseKind::Slices { versions } => versions.clone(),
     };
-    let regime = match cli.regime() {
+    let regime = match cli.regime {
         Regime::Regime1 => "regime1",
         Regime::Regime2 => "regime2",
     };
@@ -488,21 +487,21 @@ fn build_row(
         case: case.label.clone(),
         versions: versions.join("|"),
         n_versions: versions.len(),
-        synthetic_slice: matches!(cli.regime(), Regime::Regime2),
+        synthetic_slice: matches!(cli.regime, Regime::Regime2),
         tier: tier.name.clone(),
         encoder: encoder.name().to_string(),
         tier_list: tier.tiers.iter().map(|t| t.to_string()).collect::<Vec<_>>().join("-"),
         features_num: features_num_of(tier),
         tier_n: tier.tiers.len(),
-        sampling_rate: cli.sampling_rate(),
+        sampling_rate: cli.sampling_rate,
         min_jaccard: sc.min_jaccard,
         max_df: sc.max_df,
         rare_first: sc.rare_first,
         fp_metric_threshold: sc.fp_metric_threshold,
-        cdc_min: cli.cdc_min(),
-        cdc_avg: cli.cdc_avg(),
-        cdc_max: cli.cdc_max(),
-        seed: cli.seed(),
+        cdc_min: cli.cdc_min,
+        cdc_avg: cli.cdc_avg,
+        cdc_max: cli.cdc_max,
+        seed: cli.seed,
         cdc_ratio: outcome.cdc_ratio,
         total_dedup: outcome.total_dedup,
         delta_gain: outcome.total_dedup - outcome.cdc_ratio,
@@ -517,43 +516,43 @@ fn build_row(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let cli = Cli::parse();
-    let tiers = resolve_tiers(cli.tiers())?;
-    if cli.encoders().is_empty() {
+    let cli = parse_cli();
+    let tiers = resolve_tiers(&cli.tiers)?;
+    if cli.encoders.is_empty() {
         return Err("at least one encoder must be selected".into());
     }
     let search_configs = build_search_configs(&cli);
     let cases = resolve_cases(&cli)?;
 
-    if let Some(parent) = cli.out().parent() {
+    if let Some(parent) = cli.out.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
         }
     }
-    let mut writer = csv::Writer::from_path(cli.out())?;
+    let mut writer = csv::Writer::from_path(&cli.out)?;
 
     let params = RunParams {
-        sampling_rate: cli.sampling_rate(),
-        cdc_min: cli.cdc_min(),
-        cdc_avg: cli.cdc_avg(),
-        cdc_max: cli.cdc_max(),
+        sampling_rate: cli.sampling_rate,
+        cdc_min: cli.cdc_min,
+        cdc_avg: cli.cdc_avg,
+        cdc_max: cli.cdc_max,
     };
 
     eprintln!(
         "regime={:?} cases={} tiers={} encoders={} search_configs={} out={}",
-        cli.regime(),
+        cli.regime,
         cases.len(),
         tiers.len(),
-        cli.encoders().iter().map(|e| e.name()).collect::<Vec<_>>().join(","),
+        cli.encoders.iter().map(|e| e.name()).collect::<Vec<_>>().join(","),
         search_configs.len(),
-        cli.out().display()
+        cli.out.display()
     );
 
     for case in &cases {
         let version_dirs = materialize(case, &cli)?;
         eprintln!("== case {} ==", case.label);
         for tier in &tiers {
-            for encoder in cli.encoders() {
+            for encoder in &cli.encoders {
                 for sc in &search_configs {
                     let outcome = run_for_tier(tier, &params, sc, *encoder, &version_dirs)?;
                     let row = build_row(&cli, case, tier, *encoder, sc, &outcome);
@@ -576,6 +575,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    eprintln!("wrote {}", cli.out().display());
+    eprintln!("wrote {}", cli.out.display());
     Ok(())
 }

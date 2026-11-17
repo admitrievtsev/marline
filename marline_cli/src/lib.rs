@@ -39,111 +39,62 @@ impl EncoderKind {
     about = "Palantir kernel-dataset benchmark runner (regime1: full-tree windows, regime2: uniform slices)"
 )]
 pub struct Cli {
+    /// Benchmark regime.
     #[arg(long, value_enum, default_value_t = Regime::Regime2)]
-    regime: Regime,
+    pub regime: Regime,
+    /// Dataset root directory.
     #[arg(long, default_value = "/home/maxllon/pornfolder/linuxes")]
-    root: PathBuf,
+    pub root: PathBuf,
+    /// Selected kernel versions.
     #[arg(long, value_delimiter = ',')]
-    versions: Vec<String>,
+    pub versions: Vec<String>,
+    /// Selected version windows.
     #[arg(long, value_delimiter = ',')]
-    windows: Vec<String>,
+    pub windows: Vec<String>,
+    /// Selected tier configurations.
     #[arg(long, value_delimiter = ',')]
-    tiers: Vec<String>,
+    pub tiers: Vec<String>,
+    /// Selected delta encoders.
     #[arg(long, alias = "codecs", value_enum, value_delimiter = ',', default_value = "gdelta")]
-    encoders: Vec<EncoderKind>,
+    pub encoders: Vec<EncoderKind>,
+    /// Sampling rate.
     #[arg(long, default_value_t = 7)]
-    sampling_rate: u64,
+    pub sampling_rate: u64,
+    /// Minimum Jaccard thresholds.
     #[arg(long, value_delimiter = ',')]
-    min_jaccard: Vec<f64>,
+    pub min_jaccard: Vec<f64>,
+    /// Maximum document-frequency values.
     #[arg(long, value_delimiter = ',')]
-    max_df: Vec<usize>,
+    pub max_df: Vec<usize>,
+    /// Rare-first flags.
     #[arg(long, value_delimiter = ',')]
-    rare_first: Vec<bool>,
+    pub rare_first: Vec<bool>,
+    /// Fingerprint metric thresholds.
     #[arg(long, value_delimiter = ',')]
-    fp_metric_threshold: Vec<u8>,
+    pub fp_metric_threshold: Vec<u8>,
+    /// Minimum CDC chunk size.
     #[arg(long, default_value_t = 8192)]
-    cdc_min: usize,
+    pub cdc_min: usize,
+    /// Average CDC chunk size.
     #[arg(long, default_value_t = 32768)]
-    cdc_avg: usize,
+    pub cdc_avg: usize,
+    /// Maximum CDC chunk size.
     #[arg(long, default_value_t = 65536)]
-    cdc_max: usize,
+    pub cdc_max: usize,
+    /// Random seed.
     #[arg(long, default_value = "0", value_parser = parse_seed)]
-    seed: u64,
+    pub seed: u64,
+    /// Whether extraction is disabled.
     #[arg(long)]
-    no_extract: bool,
+    pub no_extract: bool,
+    /// Output path.
     #[arg(long)]
-    out: PathBuf,
+    pub out: PathBuf,
 }
 
-impl Cli {
-    /// Returns the selected benchmark regime.
-    pub fn regime(&self) -> Regime {
-        self.regime
-    }
-    /// Returns the dataset root directory.
-    pub fn root(&self) -> &PathBuf {
-        &self.root
-    }
-    /// Returns the selected kernel versions.
-    pub fn versions(&self) -> &[String] {
-        &self.versions
-    }
-    /// Returns the selected version windows.
-    pub fn windows(&self) -> &[String] {
-        &self.windows
-    }
-    /// Returns the selected tier configurations.
-    pub fn tiers(&self) -> &[String] {
-        &self.tiers
-    }
-    /// Returns the selected delta encoders.
-    pub fn encoders(&self) -> &[EncoderKind] {
-        &self.encoders
-    }
-    /// Returns the sampling rate.
-    pub fn sampling_rate(&self) -> u64 {
-        self.sampling_rate
-    }
-    /// Returns the minimum Jaccard thresholds.
-    pub fn min_jaccard(&self) -> &[f64] {
-        &self.min_jaccard
-    }
-    /// Returns the maximum document-frequency values.
-    pub fn max_df(&self) -> &[usize] {
-        &self.max_df
-    }
-    /// Returns the rare-first flags.
-    pub fn rare_first(&self) -> &[bool] {
-        &self.rare_first
-    }
-    /// Returns the fingerprint metric thresholds.
-    pub fn fp_metric_threshold(&self) -> &[u8] {
-        &self.fp_metric_threshold
-    }
-    /// Returns the minimum CDC chunk size.
-    pub fn cdc_min(&self) -> usize {
-        self.cdc_min
-    }
-    /// Returns the average CDC chunk size.
-    pub fn cdc_avg(&self) -> usize {
-        self.cdc_avg
-    }
-    /// Returns the maximum CDC chunk size.
-    pub fn cdc_max(&self) -> usize {
-        self.cdc_max
-    }
-    /// Returns the random seed.
-    pub fn seed(&self) -> u64 {
-        self.seed
-    }
-    /// Returns whether extraction is disabled.
-    pub fn no_extract(&self) -> bool {
-        self.no_extract
-    }
-    /// Returns the output path.
-    pub fn out(&self) -> &PathBuf {
-        &self.out
-    }
+/// Parses the command line into [`Cli`].
+pub fn parse_cli() -> Cli {
+    Cli::parse()
 }
 
 fn parse_seed(raw: &str) -> Result<u64, String> {
