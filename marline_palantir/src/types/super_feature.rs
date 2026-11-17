@@ -40,9 +40,9 @@ impl SuperFeature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TierConfig<const N: usize> {
     /// Group size per tier (raw features packed into each super-feature).
-    pub tier_list: [u32; N],
+    tier_list: [u32; N],
     /// Override for total raw features (defaults to LCM of tier_list).
-    pub features_num: Option<usize>,
+    features_num: Option<usize>,
 }
 
 impl<const N: usize> TierConfig<N> {
@@ -53,5 +53,13 @@ impl<const N: usize> TierConfig<N> {
 
     pub fn with_features_num(tier_list: [u32; N], features_num: usize) -> Self {
         Self { tier_list, features_num: Some(features_num) }
+    }
+
+    pub fn tier_list(&self) -> &[u32; N] {
+        &self.tier_list
+    }
+
+    pub fn features_num(&self) -> Option<usize> {
+        self.features_num
     }
 }

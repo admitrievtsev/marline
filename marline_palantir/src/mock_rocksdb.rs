@@ -31,9 +31,9 @@ impl From<Vec<u8>> for Entry {
 
 pub struct MockRocksDBMap {
     inner: HashMap<[u8; 32], Entry>,
-    pub get_count: Cell<usize>,
-    pub insert_count: Cell<usize>,
-    pub clear_count: Cell<usize>,
+    get_count: Cell<usize>,
+    insert_count: Cell<usize>,
+    clear_count: Cell<usize>,
 }
 
 impl MockRocksDBMap {
@@ -106,5 +106,17 @@ impl MockRocksDBMap {
     }
     pub fn total_bytes(&self) -> usize {
         self.inner.values().map(|v| v.data.len()).sum()
+    }
+
+    pub fn get_count(&self) -> usize {
+        self.get_count.get()
+    }
+
+    pub fn insert_count(&self) -> usize {
+        self.insert_count.get()
+    }
+
+    pub fn clear_count(&self) -> usize {
+        self.clear_count.get()
     }
 }

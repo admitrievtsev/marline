@@ -110,6 +110,107 @@ impl ZdeltaEncoder {
         }
     }
 
+    pub fn encode_data(&self, target_data: &[u8], parent_data: &[u8]) -> Vec<u8> {
+        let lookup_table = build_triplet_lookup_table(parent_data)
+            .expect("Parent chunk must contain at least one triplet");
+        let mut delta_code = Vec::new();
+        let mut uncompressed_data = 0;
+        let mut pointers = MatchPointers::new(0, 0, 0);
+        let mut previous_match_offset = None;
+        let mut bit_vec_delta_code = BitVec::new();
+        let mut position = 0;
+
+        while position + MIN_MATCH_LENGTH <= target_data.len() {
+            let triplet: Triplet = target_data[position..position + MIN_MATCH_LENGTH]
+                .try_into()
+                .expect("triplet slice length is fixed");
+            let hash = compute_triplet_hash(&triplet);
+            if let Some(parent_positions) = lookup_table.get(&hash) {
+                if let Some((match_length, offset, pointer_type)) = select_best_match(
+                    target_data,
+                    parent_data,
+                    position,
+                    parent_positions,
+                    &pointers,
+                ) {
+                    if let Some(book) = self.huffman_book() {
+                        if let Ok(encoded) = encode_match_huffman(
+                            match_length,
+                            offset,
+                            &pointer_type,
+                            book,
+                            target_data.len() - position,
+                        ) {
+                            bit_vec_delta_code.extend(&encoded);
+                        } else {
+                            for &byte in &target_data[position..position + match_length] {
+                                self.encode_literal(
+                                    byte,
+                                    &mut delta_code,
+                                    &mut bit_vec_delta_code,
+                                    &mut uncompressed_data,
+                                );
+                            }
+                        }
+                    } else if let Ok(encoded) = encode_match_raw(
+                        match_length,
+                        offset,
+                        &pointer_type,
+                        target_data.len() - position,
+                    ) {
+                        delta_code.extend_from_slice(&encoded);
+                    } else {
+                        for &byte in &target_data[position..position + match_length] {
+                            self.encode_literal(
+                                byte,
+                                &mut delta_code,
+                                &mut bit_vec_delta_code,
+                                &mut uncompressed_data,
+                            );
+                        }
+                    }
+                    let ref_end = match pointer_type {
+                        ReferencePointerType::TargetLocal => position + match_length,
+                        _ => {
+                            let base_ptr = pointers.get(&pointer_type);
+                            (base_ptr as isize + offset as isize + match_length as isize) as usize
+                        }
+                    };
+                    pointers.smart_update_after_match(
+                        ref_end,
+                        offset,
+                        pointer_type,
+                        previous_match_offset,
+                    );
+                    previous_match_offset = Some(offset);
+                    position += match_length;
+                    continue;
+                }
+            }
+            self.encode_literal(
+                target_data[position],
+                &mut delta_code,
+                &mut bit_vec_delta_code,
+                &mut uncompressed_data,
+            );
+            position += 1;
+        }
+
+        while position < target_data.len() {
+            self.encode_literal(
+                target_data[position],
+                &mut delta_code,
+                &mut bit_vec_delta_code,
+                &mut uncompressed_data,
+            );
+            position += 1;
+        }
+        if self.huffman_book().is_some() {
+            delta_code.extend_from_slice(&bit_vec_delta_code.to_bytes());
+        }
+        delta_code
+    }
+
     pub fn huffman_book(&self) -> Option<&Book<u8>> {
         self.huffman_book.as_ref()
     }

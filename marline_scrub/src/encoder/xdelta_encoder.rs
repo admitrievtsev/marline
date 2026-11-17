@@ -36,6 +36,37 @@ impl XdeltaEncoder {
         XdeltaEncoder { zstd_flag }
     }
 
+    pub fn encode_data(&self, chunk_data: &[u8], parent_data: &[u8]) -> Vec<u8> {
+        let word_hash_offsets = create_block_hashmap(parent_data);
+        let mut delta_code = Vec::new();
+        let mut i = 0;
+        while i + BLOCK_SIZE <= chunk_data.len() {
+            let hash = adler32(&chunk_data[i..i + BLOCK_SIZE]);
+            if !word_hash_offsets.contains_key(&hash) {
+                encode_insert_sequence(
+                    chunk_data,
+                    &mut i,
+                    &word_hash_offsets,
+                    &mut delta_code,
+                    hash,
+                );
+            } else {
+                encode_copy_sequence(
+                    parent_data,
+                    chunk_data,
+                    &mut i,
+                    &mut delta_code,
+                    hash,
+                    &word_hash_offsets,
+                );
+            }
+        }
+        if i < chunk_data.len() {
+            encode_insert_instruction(&chunk_data[i..], &mut delta_code);
+        }
+        delta_code
+    }
+
     /// Encodes a single chunk as delta against a parent chunk using xdelta algorithm.
     ///
     /// # Type Parameters

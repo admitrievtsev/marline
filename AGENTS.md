@@ -14,6 +14,7 @@ ChunkFS (public GitHub dependency). Build and run requirements: see README.md.
 - `marline_delta` — delta-encoding utilities shared by the other crates
 - `marline_palantir` — Palantir pipeline: lifecycle tiers, super-feature generator, FP/SF tables, storage backends
   (mock RocksDB), metadata manager; binaries `palantir_backup_bench`, `palantir_metrics`
+- `marline_cli` — clap-only command-line argument layer for `palantir_metrics`: `Cli`, `Regime`, `EncoderKind`
 - `marline_index` — sketch-based similarity search index: `SketchIndexApi` trait, `InvertedSketchIndex`,
   `HeuristicInvertedSketchIndex`, `IndexStorage` storage trait; criterion bench `benches/throughput.rs` (harness=false)
 
@@ -24,6 +25,7 @@ Notes:
 - All other dependencies are declared once in `[workspace.dependencies]` of the root `Cargo.toml` (`rand`, `rayon`,
   `zstd`, `thiserror`, `huffman-compress`, `bit-vec`, `log`, `fasthash`); crates reference them with
   `x.workspace = true`. Add new dependencies there, not to individual manifests.
+- `marline_cli` must not depend on `marline_palantir`; otherwise `cargo` reports a cyclic package dependency.
 - `Cargo.lock` is not committed (library workspace, see `.gitignore`); do not add it back.
 - `marline_sketcher` uses `edition = "2024"` (needs Rust >= 1.85) while the rest of the workspace is edition 2021 —
   keep new crates on `edition.workspace = true` unless there is a reason not to.

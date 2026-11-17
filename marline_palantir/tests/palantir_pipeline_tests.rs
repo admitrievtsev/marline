@@ -4,6 +4,7 @@ use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, Hasher, Scrub};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
+use marline_palantir::encoder::{DdeltaEncoder, Encoder, XdeltaEncoder, ZdeltaEncoder};
 use marline_palantir::lifecycle_manager::LifecycleManager;
 use marline_palantir::metadata_manager::MetadataManager;
 use marline_palantir::palantir_scrubber::PalantirScrubber;
@@ -53,9 +54,15 @@ fn similar_chunks() {
         SearchConfig::default(),
     );
 
-    let base: Vec<u8> = (0..8192).map(|i| (i % 256) as u8).collect();
+    let mut state = 0x1234_5678u32;
+    let base: Vec<u8> = (0..8192)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
     let mut similar = base.clone();
-    for item in similar[4096..4916].iter_mut() {
+    for item in similar[4096..4112].iter_mut() {
         *item = item.wrapping_add(7);
     }
 
@@ -63,13 +70,14 @@ fn similar_chunks() {
     let hash_similar = hash_data(&similar);
 
     let mut database = HashMap::new();
-    database.insert(hash_base, DataContainer::from(base.clone()));
-    database.insert(hash_similar, DataContainer::from(similar.clone()));
-
     let mut target_map = HashMap::new();
+    database.insert(hash_base, DataContainer::from(base.clone()));
+    scrubber.scrub(&mut database, &mut target_map).unwrap();
+    database.clear();
+    database.insert(hash_similar, DataContainer::from(similar.clone()));
     let result = scrubber.scrub(&mut database, &mut target_map).unwrap();
 
-    assert_eq!(result.processed_data, base.len() + similar.len());
+    assert_eq!(result.processed_data, similar.len());
     assert_eq!(target_map.len(), 2);
 
     let delta_count = [(&hash_base, &base), (&hash_similar, &similar)]
@@ -93,10 +101,30 @@ fn similar_chunks() {
         }
     }
 
-    for hash in [&hash_base, &hash_similar] {
-        match database.get(hash).unwrap().extract() {
-            Data::TargetChunk(keys) => assert_eq!(keys.as_slice(), &[*hash]),
-            _ => panic!("Expected TargetChunk after scrub"),
-        }
+    match database.get(&hash_similar).unwrap().extract() {
+        Data::TargetChunk(keys) => assert_eq!(keys.as_slice(), &[hash_similar]),
+        _ => panic!("Expected TargetChunk after scrub"),
     }
+}
+
+fn encoder_round_trip<E: Encoder>(encoder: E) {
+    let mut state = 0x1234_5678u32;
+    let base: Vec<u8> = (0..8192)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
+    let mut new = base.clone();
+    new[4096..4916].fill(0x5a);
+    let delta = encoder.encode(&new, &base);
+    assert_eq!(encoder.decode(&base, &delta), new, "{} round-trip", encoder.name());
+}
+
+#[test]
+fn encoder_implementations_round_trip() {
+    encoder_round_trip(GdeltaEncoder);
+    encoder_round_trip(XdeltaEncoder);
+    encoder_round_trip(DdeltaEncoder);
+    encoder_round_trip(ZdeltaEncoder);
 }

@@ -16,6 +16,9 @@ marline_index = {path = "../marline_index"}
 zstd.workspace = true
 num = "0.4"
 blake3 = "1.8.5"
+marline_cli = { path = "../marline_cli" }
+serde = { version = "1", features = ["derive"] }
+csv = "1.4"
 
 [[bin]]
 name = "palantir_metrics"

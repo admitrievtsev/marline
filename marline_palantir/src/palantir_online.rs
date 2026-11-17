@@ -1,4 +1,4 @@
-use crate::encoder::PalantirEncoder;
+use crate::encoder::Encoder;
 use crate::error::PalantirError;
 use crate::fastcdc::{collect_raw_features, FastCDC};
 use crate::lifecycle_manager::LifecycleTierConfig;
@@ -31,7 +31,7 @@ pub trait OnlineSBC<
 pub struct PalantirOnline<
     S,
     H: Clone + Eq + Hash + Send + Sync + 'static + std::default::Default,
-    E: PalantirEncoder,
+    E: Encoder,
     const N: usize,
 > {
     sf_gen: S,
@@ -55,7 +55,7 @@ pub struct PalantirOnline<
 }
 
 #[allow(unused_variables)]
-impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
+impl<S: SuperFeatureGenerator, E: Encoder, const N: usize> OnlineSBC<S, [u8; 32], E, N>
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
@@ -90,7 +90,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                             let entry = get_entry(
                                 &mut self.manifest_base,
                                 &self.delta_bases,
-                                &base_hash.hash,
+                                base_hash.hash(),
                             );
 
                             let data = entry.get_data().to_vec();
@@ -110,7 +110,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                         / simple_compressed.len() as f64;
                                     if ratio < self.fp_threshold {
                                         let _ = self.target_map.insert(*hash, delta_compressed);
-                                        self.delta_bases.insert(*hash, base_hash.hash);
+                                        self.delta_bases.insert(*hash, *base_hash.hash());
                                         self.delta_stored += 1;
                                     } else {
                                         self.target_map.insert(*hash, chunk_data.clone());
@@ -121,7 +121,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                 }
                                 None => {
                                     /*
-                                    let fp_table = E::generate_fp_table(&data);
+                                    let fp_table = self.encoder.generate_fp_table(&data);
                                     let _ = self.manifest_base.insert(*hash, Entry::new(fp_table.clone(), chunk_data.clone()));
 
                                     let delta = self
@@ -138,7 +138,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                                     let delta_compressed = data;
 
                                     let _ = self.target_map.insert(*hash, delta_compressed);
-                                    self.delta_bases.insert(*hash, base_hash.hash);
+                                    self.delta_bases.insert(*hash, *base_hash.hash());
                                     self.delta_stored += 1;
                                 }
                             }
@@ -170,12 +170,8 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
     }
 }
 
-impl<
-        S,
-        H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static,
-        E: PalantirEncoder,
-        const N: usize,
-    > PalantirOnline<S, H, E, N>
+impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E: Encoder, const N: usize>
+    PalantirOnline<S, H, E, N>
 {
     /// Creates a new `PalantirScrubber`.
     ///

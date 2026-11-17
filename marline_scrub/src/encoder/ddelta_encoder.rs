@@ -105,6 +105,48 @@ impl DdeltaEncoder {
         DdeltaEncoder { edelta_optimizations: Some(edelta_optimizations) }
     }
 
+    pub fn encode_data(&self, target_data: &[u8], source_data: &[u8]) -> Vec<u8> {
+        let mut source_chunks_indices = build_chunks_indices(&gear_chunking(source_data));
+        let target_chunks = gear_chunking(target_data);
+        let mut delta_code = Vec::new();
+        let mut position = 0;
+        while position < target_chunks.len() {
+            let chunk = target_chunks[position];
+            match self.edelta_optimizations {
+                Some(EdeltaOptimizations::SpeedIsPriority) => process_target_chunk_with_edelta(
+                    source_data,
+                    target_data,
+                    &mut source_chunks_indices,
+                    &target_chunks,
+                    &mut position,
+                    &mut delta_code,
+                    EdeltaOptimizations::SpeedIsPriority,
+                ),
+                Some(EdeltaOptimizations::CompressionIsPriority) => {
+                    process_target_chunk_with_edelta(
+                        source_data,
+                        target_data,
+                        &mut source_chunks_indices,
+                        &target_chunks,
+                        &mut position,
+                        &mut delta_code,
+                        EdeltaOptimizations::CompressionIsPriority,
+                    )
+                }
+                None => {
+                    process_target_chunk_with_ddelta(
+                        source_data,
+                        &source_chunks_indices,
+                        chunk,
+                        &mut delta_code,
+                    );
+                    position += 1;
+                }
+            }
+        }
+        delta_code
+    }
+
     /// Encodes a single data chunk using delta compression against a reference.
     ///
     /// # Arguments
