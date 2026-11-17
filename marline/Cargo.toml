@@ -13,6 +13,10 @@ csv = "1.3"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+marline_palantir = { path = "../marline_palantir" }
+marline_scrub = { path = "../marline_scrub" }
+marline_sketcher = { path = "../marline_sketcher" }
+marline_index = { path = "../marline_index" }
 
 
 [profile.release]
