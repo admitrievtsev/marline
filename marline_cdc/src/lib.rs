@@ -14,22 +14,6 @@ use marline_utils::{KB, MB};
 
 use fastcdc::{AVERAGE_MAX, AVERAGE_MIN, MAXIMUM_MAX, MAXIMUM_MIN, MINIMUM_MAX, MINIMUM_MIN};
 
-/// Error returned when chunk size parameters are rejected by [`ChunkerBuilder`].
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum ChunkerBuilderError {
-    /// Sizes are outside the supported ranges or are not ordered as `min <= avg <= max`.
-    #[error("invalid chunk sizes: min={min}, avg={avg}, max={max}")]
-    InvalidSizes {
-        /// Requested minimum chunk size.
-        min: usize,
-        /// Requested average chunk size.
-        avg: usize,
-        /// Requested maximum chunk size.
-        max: usize,
-    },
-}
-
 /// Validates chunk size parameters and builds content-defined chunkers.
 #[derive(Debug, Clone, Copy)]
 pub struct ChunkerBuilder {
@@ -48,28 +32,19 @@ impl Default for ChunkerBuilder {
 impl ChunkerBuilder {
     /// Creates a builder from minimum, average and maximum chunk sizes in bytes.
     ///
-    /// # Errors
+    /// # Panics
     ///
-    /// Returns [`ChunkerBuilderError::InvalidSizes`] if any size is outside its supported range
+    /// Panics if any size is outside its supported range (`min_size` in `64..=1 MiB`,
+    /// `avg_size` in `256..=4 MiB`, `max_size` in `1 KiB..=16 MiB`)
     /// or the sizes are not ordered as `min_size <= avg_size <= max_size`.
-    pub fn new(
-        min_size: usize,
-        avg_size: usize,
-        max_size: usize,
-    ) -> Result<Self, ChunkerBuilderError> {
+    pub fn new(min_size: usize, avg_size: usize, max_size: usize) -> Self {
         let valid = (MINIMUM_MIN..=MINIMUM_MAX).contains(&min_size)
             && (AVERAGE_MIN..=AVERAGE_MAX).contains(&avg_size)
             && (MAXIMUM_MIN..=MAXIMUM_MAX).contains(&max_size)
             && min_size <= avg_size
             && avg_size <= max_size;
-        if !valid {
-            return Err(ChunkerBuilderError::InvalidSizes {
-                min: min_size,
-                avg: avg_size,
-                max: max_size,
-            });
-        }
-        Ok(Self { min_size, avg_size, max_size })
+        assert!(valid, "invalid chunk sizes: min={min_size}, avg={avg_size}, max={max_size}");
+        Self { min_size, avg_size, max_size }
     }
 
     /// Minimum chunk size; also the start of the feature-collection window inside each chunk.
@@ -226,38 +201,70 @@ mod tests {
         }
     }
 
+    // `new` must reject sizes outside the FastCDC bounds and unordered sizes: the vendored
+    // `fastcdc.rs` checks them only with `debug_assert!`, so in release builds invalid sizes
+    // lead to out-of-bounds panics, endless empty chunks, lost data or undersized chunks.
+    // `min_size == 0` also divides by zero in the vendored `size_hint`.
     #[test]
-    fn test_new_rejects_invalid_sizes() {
-        let cases = [
-            (0, 256, 1024),
-            (1, 256, 1024),
-            (MINIMUM_MIN - 1, 256, 1024),
-            (MINIMUM_MAX + 1, AVERAGE_MAX, MAXIMUM_MAX),
-            (256, 1024, 0),
-            (64, AVERAGE_MAX + 1, MAXIMUM_MAX),
-            (64, AVERAGE_MIN - 1, 1024),
-            (64, 256, MAXIMUM_MIN - 1),
-            (64, 256, MAXIMUM_MAX + 1),
-            (4096, 1024, 8192),
-            (256, 4096, 2048),
-        ];
-        for (min, avg, max) in cases {
-            assert!(
-                matches!(
-                    ChunkerBuilder::new(min, avg, max),
-                    Err(ChunkerBuilderError::InvalidSizes { .. })
-                ),
-                "Sizes (min={min}, avg={avg}, max={max}) must be rejected"
-            );
-        }
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_min_below_range() {
+        ChunkerBuilder::new(MINIMUM_MIN - 1, 256, 1024);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_min_zero() {
+        ChunkerBuilder::new(0, 256, 1024);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_min_above_range() {
+        ChunkerBuilder::new(MINIMUM_MAX + 1, AVERAGE_MAX, MAXIMUM_MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_avg_below_range() {
+        ChunkerBuilder::new(64, AVERAGE_MIN - 1, 1024);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_avg_above_range() {
+        ChunkerBuilder::new(64, AVERAGE_MAX + 1, MAXIMUM_MAX);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_max_below_range() {
+        ChunkerBuilder::new(64, 256, MAXIMUM_MIN - 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_max_above_range() {
+        ChunkerBuilder::new(64, 256, MAXIMUM_MAX + 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_min_above_avg() {
+        ChunkerBuilder::new(4096, 1024, 8192);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid chunk sizes")]
+    fn test_new_rejects_avg_above_max() {
+        ChunkerBuilder::new(256, 4096, 2048);
     }
 
     #[test]
     fn test_new_accepts_range_bounds() {
-        assert!(ChunkerBuilder::new(MINIMUM_MAX, AVERAGE_MAX, MAXIMUM_MAX).is_ok());
+        // Upper bounds must not panic.
+        ChunkerBuilder::new(MINIMUM_MAX, AVERAGE_MAX, MAXIMUM_MAX);
 
-        let builder = ChunkerBuilder::new(MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN)
-            .expect("lower bounds are valid");
+        let builder = ChunkerBuilder::new(MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN);
         let data = generate_test_data(64 * KB);
         let chunks: Vec<_> = builder.chunker(&data).collect();
         assert_chunk_layout(&chunks, data.len(), MINIMUM_MIN, MAXIMUM_MIN);
@@ -266,7 +273,8 @@ mod tests {
     #[test]
     fn test_default_is_valid() {
         let d = ChunkerBuilder::default();
-        assert!(ChunkerBuilder::new(d.min_size, d.avg_size, d.max_size).is_ok());
+        // The default sizes must pass the same validation as user-supplied ones.
+        ChunkerBuilder::new(d.min_size, d.avg_size, d.max_size);
     }
 
     #[test]
@@ -281,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_chunker_empty() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data: &[u8] = &[];
         let chunks: Vec<_> = builder.chunker(data).collect();
 
@@ -290,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_empty() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let reader = Cursor::new(Vec::<u8>::new());
         let chunks: Vec<_> = builder
             .stream_chunker(reader)
@@ -302,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_chunker_data_smaller_than_min_size() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(128); // Smaller than min_size (256)
         let chunks: Vec<_> = builder.chunker(&data).collect();
 
@@ -316,7 +324,7 @@ mod tests {
     #[test]
     fn test_chunker_invariants() {
         let (min_size, avg_size, max_size) = (256, 1024, 4096);
-        let builder = ChunkerBuilder::new(min_size, avg_size, max_size).expect("valid sizes");
+        let builder = ChunkerBuilder::new(min_size, avg_size, max_size);
 
         let data = generate_test_data(64 * KB);
         let chunks: Vec<_> = builder.chunker(&data).collect();
@@ -328,7 +336,7 @@ mod tests {
     #[test]
     fn test_uniform_data_hits_max_size() {
         let max_size = 4096;
-        let builder = ChunkerBuilder::new(256, 1024, max_size).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, max_size);
 
         // All-zero input is a deliberate pathological case: the rolling hash never
         // finds a content-defined cut point, so every cut is forced at max_size.
@@ -344,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_matches_chunker() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
         let slice_chunks: Vec<_> = builder.chunker(&data).collect();
@@ -358,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_short_reads_match_chunker() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
         let slice_chunks: Vec<_> = builder.chunker(&data).collect();
@@ -373,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_propagates_read_error() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096).expect("valid sizes");
+        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let reader = FailingReader { data: generate_test_data(1000), pos: 0 };
 
         let first = builder.stream_chunker(reader).next();

@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 marline_utils = { path = "../marline_utils" }
-thiserror.workspace = true
 
 [dev-dependencies]
 blake3.workspace = true
