@@ -150,11 +150,12 @@ const EDGE_32K: usize = 32 * 1024;
 const EDGE_64K: usize = 64 * 1024;
 const REPEATED_BYTE: u8 = 0xAB;
 
-struct Rng {
+/// SplitMix64 PRNG for reproducible test data.
+struct SplitMix64 {
     state: u64,
 }
 
-impl Rng {
+impl SplitMix64 {
     fn new(seed: u64) -> Self {
         Self { state: seed }
     }
@@ -190,7 +191,7 @@ impl Rng {
 
 /// Builds a corpus from a seed.
 pub fn build(seed: u64, opts: &Options) -> Corpus {
-    let mut base_rng = Rng::new(seed);
+    let mut base_rng = SplitMix64::new(seed);
 
     let similar_groups = (0..opts.docs)
         .map(|doc| {
@@ -208,7 +209,7 @@ pub fn build(seed: u64, opts: &Options) -> Corpus {
 
     let unrelated = (0..opts.docs)
         .map(|i| {
-            let mut rng = Rng::new(
+            let mut rng = SplitMix64::new(
                 seed ^ (SALT_UNRELATED + i as u64).wrapping_mul(UNRELATED_SEED_MULTIPLIER),
             );
             rng.bytes(opts.size / 2 + i)
@@ -216,7 +217,7 @@ pub fn build(seed: u64, opts: &Options) -> Corpus {
         .collect();
 
     let edge_cases = if opts.edge_cases {
-        let mut rng = Rng::new(seed ^ SALT_EDGE);
+        let mut rng = SplitMix64::new(seed ^ SALT_EDGE);
         vec![
             Vec::new(),
             vec![0u8],
@@ -269,7 +270,7 @@ fn mutate(base: &[u8], seed: u64, fraction: f64) -> Vec<u8> {
         return out;
     }
 
-    let mut rng = Rng::new(seed);
+    let mut rng = SplitMix64::new(seed);
     let window_len = (base.len() / 16).max(64).min(base.len());
     let window_start = rng.next_usize(base.len() - window_len + 1);
     let window_end = window_start + window_len;
@@ -332,7 +333,7 @@ mod tests {
 
     #[test]
     fn mutate_keeps_length_bounded() {
-        let base = Rng::new(1).bytes(64 * 1024);
+        let base = SplitMix64::new(1).bytes(64 * 1024);
         let version = mutate(&base, 99, 0.01);
         let ratio = version.len() as f64 / base.len() as f64;
         assert!((ratio - 1.0).abs() < 0.1, "length must not drift far: {ratio}");

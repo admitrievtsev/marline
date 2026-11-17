@@ -159,16 +159,11 @@ fn run_sbc(name: &str, kernel_dirs: &[std::path::PathBuf]) {
     for dir in kernel_dirs {
         let mut files = Vec::new();
         collect_files(dir, &mut files);
-        original_total += files.iter().map(Vec::len).sum::<usize>();
+        let kernel_data = files.concat();
+        original_total += kernel_data.len();
+        drop(files); // Free per-file buffers before writing the concatenated kernel.
 
-        let mut aged = Vec::new();
-        for data in &files {
-            aged.extend_from_slice(data);
-        }
-        drop(files); // free per-file buffers before write holds the concat
-
-        online_sbc.write(&aged).unwrap();
-        drop(aged); // free the concat buffer once the chunks have been copied out
+        online_sbc.write(&kernel_data).unwrap();
     }
 
     let elapsed = start.elapsed();
