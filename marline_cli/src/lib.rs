@@ -1,18 +1,19 @@
+//! Command-line argument definitions for the `palantir_metrics` benchmark runner.
+
 use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
-use marline_palantir::encoder::{
-    DdeltaEncoder, Encoder, GdeltaEncoder, XdeltaEncoder, ZdeltaEncoder,
-};
 
+/// Benchmark regime.
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum Regime {
+pub enum Regime {
     Regime1,
     Regime2,
 }
 
+/// Delta encoder kind accepted on the command line.
 #[derive(Clone, Copy, Debug, ValueEnum)]
-pub(super) enum EncoderKind {
+pub enum EncoderKind {
     Gdelta,
     Xdelta,
     Ddelta,
@@ -20,16 +21,8 @@ pub(super) enum EncoderKind {
 }
 
 impl EncoderKind {
-    pub(super) fn build(self) -> Box<dyn Encoder> {
-        match self {
-            Self::Gdelta => Box::new(GdeltaEncoder),
-            Self::Xdelta => Box::new(XdeltaEncoder),
-            Self::Ddelta => Box::new(DdeltaEncoder),
-            Self::Zdelta => Box::new(ZdeltaEncoder),
-        }
-    }
-
-    pub(super) fn name(self) -> &'static str {
+    /// Returns the canonical encoder name.
+    pub fn name(self) -> &'static str {
         match self {
             Self::Gdelta => "gdelta",
             Self::Xdelta => "xdelta",
@@ -39,12 +32,13 @@ impl EncoderKind {
     }
 }
 
+/// Parsed arguments of the `palantir_metrics` command.
 #[derive(Parser, Debug)]
 #[command(
     name = "palantir_metrics",
     about = "Palantir kernel-dataset benchmark runner (regime1: full-tree windows, regime2: uniform slices)"
 )]
-pub(super) struct Cli {
+pub struct Cli {
     #[arg(long, value_enum, default_value_t = Regime::Regime2)]
     regime: Regime,
     #[arg(long, default_value = "/home/maxllon/pornfolder/linuxes")]
@@ -82,55 +76,72 @@ pub(super) struct Cli {
 }
 
 impl Cli {
-    pub(super) fn regime(&self) -> Regime {
+    /// Returns the selected benchmark regime.
+    pub fn regime(&self) -> Regime {
         self.regime
     }
-    pub(super) fn root(&self) -> &PathBuf {
+    /// Returns the dataset root directory.
+    pub fn root(&self) -> &PathBuf {
         &self.root
     }
-    pub(super) fn versions(&self) -> &[String] {
+    /// Returns the selected kernel versions.
+    pub fn versions(&self) -> &[String] {
         &self.versions
     }
-    pub(super) fn windows(&self) -> &[String] {
+    /// Returns the selected version windows.
+    pub fn windows(&self) -> &[String] {
         &self.windows
     }
-    pub(super) fn tiers(&self) -> &[String] {
+    /// Returns the selected tier configurations.
+    pub fn tiers(&self) -> &[String] {
         &self.tiers
     }
-    pub(super) fn encoders(&self) -> &[EncoderKind] {
+    /// Returns the selected delta encoders.
+    pub fn encoders(&self) -> &[EncoderKind] {
         &self.encoders
     }
-    pub(super) fn sampling_rate(&self) -> u64 {
+    /// Returns the sampling rate.
+    pub fn sampling_rate(&self) -> u64 {
         self.sampling_rate
     }
-    pub(super) fn min_jaccard(&self) -> &[f64] {
+    /// Returns the minimum Jaccard thresholds.
+    pub fn min_jaccard(&self) -> &[f64] {
         &self.min_jaccard
     }
-    pub(super) fn max_df(&self) -> &[usize] {
+    /// Returns the maximum document-frequency values.
+    pub fn max_df(&self) -> &[usize] {
         &self.max_df
     }
-    pub(super) fn rare_first(&self) -> &[bool] {
+    /// Returns the rare-first flags.
+    pub fn rare_first(&self) -> &[bool] {
         &self.rare_first
     }
-    pub(super) fn fp_metric_threshold(&self) -> &[u8] {
+    /// Returns the fingerprint metric thresholds.
+    pub fn fp_metric_threshold(&self) -> &[u8] {
         &self.fp_metric_threshold
     }
-    pub(super) fn cdc_min(&self) -> usize {
+    /// Returns the minimum CDC chunk size.
+    pub fn cdc_min(&self) -> usize {
         self.cdc_min
     }
-    pub(super) fn cdc_avg(&self) -> usize {
+    /// Returns the average CDC chunk size.
+    pub fn cdc_avg(&self) -> usize {
         self.cdc_avg
     }
-    pub(super) fn cdc_max(&self) -> usize {
+    /// Returns the maximum CDC chunk size.
+    pub fn cdc_max(&self) -> usize {
         self.cdc_max
     }
-    pub(super) fn seed(&self) -> u64 {
+    /// Returns the random seed.
+    pub fn seed(&self) -> u64 {
         self.seed
     }
-    pub(super) fn no_extract(&self) -> bool {
+    /// Returns whether extraction is disabled.
+    pub fn no_extract(&self) -> bool {
         self.no_extract
     }
-    pub(super) fn out(&self) -> &PathBuf {
+    /// Returns the output path.
+    pub fn out(&self) -> &PathBuf {
         &self.out
     }
 }

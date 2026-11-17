@@ -1,6 +1,3 @@
-#[path = "marlinecli/cli.rs"]
-mod marlinecli;
-
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -15,14 +12,16 @@ use chunkfs::chunkers::{FastChunker, SizeParams};
 use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{Data, DataContainer, FileSystem, Scrub, ScrubMeasurements};
 use clap::Parser;
+use marline_cli::{Cli, EncoderKind, Regime};
 use marline_index::heuristic_index::SearchConfig;
-use marline_palantir::encoder::Encoder;
+use marline_palantir::encoder::{
+    DdeltaEncoder, Encoder, GdeltaEncoder, XdeltaEncoder, ZdeltaEncoder,
+};
 use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
 use marline_palantir::palantir_scrubber::PalantirScrubber;
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::TierConfig;
 use marline_palantir::utils::lcm_vec;
-use marlinecli::{Cli, EncoderKind, Regime};
 use serde::Serialize;
 
 const MIB: f64 = 1024.0 * 1024.0;
@@ -206,6 +205,15 @@ fn materialize(case: &Case, cli: &Cli) -> Result<Vec<(String, PathBuf)>, Box<dyn
 type Db = HashMap<[u8; 32], DataContainer<[u8; 32]>>;
 type Palantir<const N: usize> = PalantirScrubber<PalantirHasher, [u8; 32], Box<dyn Encoder>, N>;
 
+fn build_encoder(kind: EncoderKind) -> Box<dyn Encoder> {
+    match kind {
+        EncoderKind::Gdelta => Box::new(GdeltaEncoder),
+        EncoderKind::Xdelta => Box::new(XdeltaEncoder),
+        EncoderKind::Ddelta => Box::new(DdeltaEncoder),
+        EncoderKind::Zdelta => Box::new(ZdeltaEncoder),
+    }
+}
+
 struct SharedScrubber<const N: usize> {
     inner: Rc<RefCell<Palantir<N>>>,
 }
@@ -292,7 +300,7 @@ fn run_timeline<const N: usize>(
         None => TierConfig::new(arr),
     };
     let scrubber =
-        PalantirScrubber::new(hasher, encoder.build(), tier_config, lifecycle, sc.clone());
+        PalantirScrubber::new(hasher, build_encoder(encoder), tier_config, lifecycle, sc.clone());
     let shared = Rc::new(RefCell::new(scrubber));
 
     let database: Db = HashMap::new();
