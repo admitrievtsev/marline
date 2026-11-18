@@ -7,6 +7,8 @@
 use crate::GEAR;
 use std::collections::HashMap;
 
+mod bounded;
+
 /// Produces a delta encoding of `new_chunk` relative to `base_chunk`.
 ///
 /// If two chunks are similar enough, the delta will be significantly smaller
@@ -22,12 +24,38 @@ pub trait PalantirEncoder {
     /// A byte vector containing the delta representation.
     fn encode(&self, new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8>;
 
+    /// Encodes only while the output remains below `limit` bytes.
+    ///
+    /// Returns `None` once the delta is known to reach the limit. The default
+    /// implementation preserves compatibility for encoders without a bounded path.
+    fn encode_below_limit(
+        &self,
+        new_chunk: &[u8],
+        base_chunk: &[u8],
+        limit: usize,
+    ) -> Option<Vec<u8>> {
+        let _ = limit;
+        Some(self.encode(new_chunk, base_chunk))
+    }
+
     fn encode_with_manifest(
         &self,
         new_chunk: &[u8],
         base_chunk: &[u8],
         manifest: &HashMap<u64, u32>,
     ) -> Vec<u8>;
+
+    /// Manifest-backed bounded encoding; defaults to full encoding for other encoders.
+    fn encode_with_manifest_below_limit(
+        &self,
+        new_chunk: &[u8],
+        base_chunk: &[u8],
+        manifest: &HashMap<u64, u32>,
+        limit: usize,
+    ) -> Option<Vec<u8>> {
+        let _ = limit;
+        Some(self.encode_with_manifest(new_chunk, base_chunk, manifest))
+    }
     fn generate_fp_table(chunk: &[u8]) -> Option<HashMap<u64, u32>>;
 }
 
@@ -41,6 +69,16 @@ impl PalantirEncoder for GdeltaEncoder {
     fn encode(&self, new_chunk: &[u8], base_chunk: &[u8]) -> Vec<u8> {
         marline_scrub::encoder::gdelta_diff(new_chunk, base_chunk)
     }
+
+    fn encode_below_limit(
+        &self,
+        new_chunk: &[u8],
+        base_chunk: &[u8],
+        limit: usize,
+    ) -> Option<Vec<u8>> {
+        bounded::bounded_gdelta_diff(new_chunk, base_chunk, limit)
+    }
+
     fn encode_with_manifest(
         &self,
         new_chunk: &[u8],
@@ -48,6 +86,16 @@ impl PalantirEncoder for GdeltaEncoder {
         manifest: &HashMap<u64, u32>,
     ) -> Vec<u8> {
         marline_scrub::encoder::gdelta_diff_new(new_chunk, base_chunk, manifest)
+    }
+
+    fn encode_with_manifest_below_limit(
+        &self,
+        new_chunk: &[u8],
+        base_chunk: &[u8],
+        manifest: &HashMap<u64, u32>,
+        limit: usize,
+    ) -> Option<Vec<u8>> {
+        bounded::bounded_gdelta_diff_new(new_chunk, base_chunk, manifest, limit)
     }
 
     fn generate_fp_table(base_chunk: &[u8]) -> Option<HashMap<u64, u32>> {

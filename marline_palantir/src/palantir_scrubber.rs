@@ -40,6 +40,10 @@ pub struct PalantirScrubber<
     encoder: E,
     /// False-positive threshold for delta encoding ratio.
     fp_threshold: f64,
+    /// Promote a chunk to a base when the encoded delta reaches this fraction of the base size.
+    delta_promote_threshold: Option<f64>,
+    /// Stop Gdelta as soon as the promotion threshold is reached.
+    early_alpha: bool,
     /// Total chunks processed.
     chunks_processed: u64,
     /// Count of chunks stored as deltas.
@@ -80,6 +84,8 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
             metadata_manager: MetadataManager::new(tier_config, lifecycle_configs, &search_config),
             encoder,
             fp_threshold: 0.9,
+            delta_promote_threshold: None,
+            early_alpha: true,
             chunks_processed: 0,
             delta_stored: 0,
             delta_bases: HashMap::new(),
@@ -89,6 +95,16 @@ impl<S, H: ChunkHash + Clone + Eq + Hash + Send + Sync + 'static, E, const N: us
 
     pub fn delta_stored(&self) -> u64 {
         self.delta_stored
+    }
+
+    /// Sets the delta-size ratio at which a chunk is promoted to a base chunk.
+    pub fn set_delta_promote_threshold(&mut self, threshold: Option<f64>) {
+        self.delta_promote_threshold = threshold;
+    }
+
+    /// Enables or disables early Gdelta termination for alpha promotion.
+    pub fn set_early_alpha(&mut self, enabled: bool) {
+        self.early_alpha = enabled;
     }
 
     pub fn fp_table_size(&self) -> usize {
@@ -137,26 +153,55 @@ where
                         None => {
                             match self.metadata_manager.lookup_super_features(&super_features) {
                                 Some((base_hash, _)) => {
-                                    match get_manifest(
+                                    let (base_chunk, manifest) = get_manifest(
                                         &self.manifest_base,
                                         &self.delta_bases,
                                         &base_hash.hash,
-                                    ) {
-                                        (base_chunk, None) => {
-                                            let delta = self.encoder.encode(chunk_data, base_chunk);
-                                            let delta_compressed = delta.clone();
-                                            let simple_compressed = delta.clone();
-                                            let _ratio = delta_compressed.len() as f64
-                                                / simple_compressed.len() as f64;
+                                    );
+                                    let alpha = self
+                                        .delta_promote_threshold
+                                        .filter(|value| value.is_finite() && *value > 0.0);
+                                    let alpha_limit = alpha.map(|value| {
+                                        (value * base_chunk.len() as f64)
+                                            .ceil()
+                                            .min(usize::MAX as f64)
+                                            as usize
+                                    });
+                                    let delta = match (manifest, alpha_limit, self.early_alpha) {
+                                        (Some(manifest), Some(limit), true) => {
+                                            self.encoder.encode_with_manifest_below_limit(
+                                                chunk_data, base_chunk, manifest, limit,
+                                            )
+                                        }
+                                        (None, Some(limit), true) => self
+                                            .encoder
+                                            .encode_below_limit(chunk_data, base_chunk, limit),
+                                        (Some(manifest), _, false)
+                                        | (Some(manifest), None, true) => {
+                                            Some(self.encoder.encode_with_manifest(
+                                                chunk_data, base_chunk, manifest,
+                                            ))
+                                        }
+                                        (None, _, false) | (None, None, true) => {
+                                            Some(self.encoder.encode(chunk_data, base_chunk))
+                                        }
+                                    };
 
-                                            let _ = &mut target_map.insert(*hash, delta_compressed);
+                                    if let Some(delta) = delta {
+                                        let promote_to_base = alpha.is_some_and(|threshold| {
+                                            delta.len() as f64
+                                                >= threshold * base_chunk.len() as f64
+                                        });
+                                        if promote_to_base {
+                                            target_map.insert(*hash, chunk_data.clone());
+                                            let _ = &mut self
+                                                .manifest_base
+                                                .insert(*hash, Entry::from(chunk_data.clone()))?;
+                                        } else if manifest.is_none() {
+                                            target_map.insert(*hash, delta.clone());
                                             self.delta_bases.insert(*hash, base_hash.hash);
                                             self.delta_stored += 1;
-                                        }
-                                        (base_chunk, Some(manifest)) => {
-                                            let delta = self.encoder.encode_with_manifest(
-                                                chunk_data, base_chunk, manifest,
-                                            );
+                                        } else {
                                             let delta_compressed =
                                                 zstd::encode_all(delta.as_slice(), 0)?;
                                             let simple_compressed =
@@ -164,8 +209,7 @@ where
                                             let ratio = delta_compressed.len() as f64
                                                 / simple_compressed.len() as f64;
                                             if ratio < self.fp_threshold {
-                                                let _ =
-                                                    &mut target_map.insert(*hash, delta_compressed);
+                                                target_map.insert(*hash, delta_compressed);
                                                 self.delta_bases.insert(*hash, base_hash.hash);
                                                 self.delta_stored += 1;
                                             } else {
@@ -176,6 +220,13 @@ where
                                                 )?;
                                             }
                                         }
+                                    } else {
+                                        // The bounded encoder has already reached ceil(alpha * base size),
+                                        // so the final delta cannot change the promotion decision.
+                                        target_map.insert(*hash, chunk_data.clone());
+                                        let _ = &mut self
+                                            .manifest_base
+                                            .insert(*hash, Entry::from(chunk_data.clone()))?;
                                     }
                                     processed_data += chunk_data.len();
                                 }

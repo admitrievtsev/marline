@@ -100,3 +100,38 @@ fn similar_chunks() {
         }
     }
 }
+
+#[test]
+fn alpha_promotes_large_delta_to_a_standalone_base() {
+    let sf_gen = PalantirHasher::new(7, vec![4, 3, 2]);
+    let encoder = GdeltaEncoder;
+    let tier_config = TierConfig::new([4, 3, 2]);
+    let lifecycle_configs = LifecycleManager::<3>::default_configs();
+    let mut scrubber = PalantirScrubber::new(
+        sf_gen,
+        encoder,
+        tier_config,
+        lifecycle_configs,
+        SearchConfig::default(),
+    );
+    scrubber.set_delta_promote_threshold(Some(0.00001));
+
+    let base: Vec<u8> = (0..8192).map(|i| (i % 256) as u8).collect();
+    let mut similar = base.clone();
+    for item in similar[4096..4916].iter_mut() {
+        *item = item.wrapping_add(7);
+    }
+    let hash_base = hash_data(&base);
+    let hash_similar = hash_data(&similar);
+    let mut database = HashMap::from([
+        (hash_base, DataContainer::from(base.clone())),
+        (hash_similar, DataContainer::from(similar.clone())),
+    ]);
+    let mut target_map = HashMap::new();
+
+    scrubber.scrub(&mut database, &mut target_map).unwrap();
+
+    assert_eq!(scrubber.delta_stored(), 0);
+    assert_eq!(target_map.get(&hash_base), Some(&base));
+    assert_eq!(target_map.get(&hash_similar), Some(&similar));
+}
