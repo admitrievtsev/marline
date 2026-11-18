@@ -72,6 +72,94 @@ where
         self.store
     }
 
+    /// Exact top-1 search that uses a rare prefix and stops once the winner is proven.
+    fn rare_first_best(
+        &self,
+        query: &S,
+        config: &SearchConfig,
+        min_overlap: usize,
+    ) -> Result<Option<K>, IndexError> {
+        let n = query.len();
+        let mut features = Vec::with_capacity(n);
+        for feature in query.iter() {
+            let df = self.store.posting_len(feature)?;
+            if config.max_df.is_some_and(|limit| df > limit) {
+                continue;
+            }
+            features.push((feature, df));
+        }
+        if features.len() < min_overlap {
+            return Ok(None);
+        }
+
+        let min_df = features.iter().map(|(_, df)| *df).min().unwrap_or(0);
+        let max_df = features.iter().map(|(_, df)| *df).max().unwrap_or(0);
+        let mut prefix_len = features.len();
+        if max_df >= min_df.saturating_mul(2) {
+            features.sort_by_key(|&(_, df)| df);
+            let proposed_prefix_len = features.len() - min_overlap + 1;
+            let full_posting_work =
+                features.iter().fold(0usize, |sum, (_, df)| sum.saturating_add(*df));
+            let prefix_posting_work = features[..proposed_prefix_len]
+                .iter()
+                .fold(0usize, |sum, (_, df)| sum.saturating_add(*df));
+            let estimated_suffix_work = features[proposed_prefix_len..]
+                .iter()
+                .fold(0usize, |sum, (_, df)| sum.saturating_add((*df).min(prefix_posting_work)));
+            let estimated_prefix_work = prefix_posting_work.saturating_add(estimated_suffix_work);
+            if estimated_prefix_work.saturating_mul(2) <= full_posting_work {
+                prefix_len = proposed_prefix_len;
+            }
+        }
+
+        let mut candidates = HashMap::new();
+        for &(feature, _) in &features[..prefix_len] {
+            self.store.accumulate_posting(feature, &mut candidates)?;
+        }
+        if let Some(threshold) = config.fp_metric_threshold {
+            candidates.retain(|key, _| {
+                self.metrics.get_metric(key).map(|metric| metric < threshold).unwrap_or(true)
+            });
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+
+        let suffix_len = features.len() - prefix_len;
+        for (suffix_index, &(feature, _)) in features[prefix_len..].iter().enumerate() {
+            self.store.verify_candidates(feature, &mut candidates)?;
+            let remaining = suffix_len - suffix_index - 1;
+            candidates.retain(|_, overlap| overlap.saturating_add(remaining) >= min_overlap);
+
+            if remaining > 0 {
+                let best = candidates
+                    .iter()
+                    .filter(|(_, overlap)| **overlap >= min_overlap)
+                    .max_by_key(|(_, overlap)| **overlap);
+                if let Some((best_key, best_overlap)) = best {
+                    let best_possible_competitor = candidates
+                        .iter()
+                        .filter(|(key, _)| *key != best_key)
+                        .map(|(_, overlap)| overlap.saturating_add(remaining).min(n))
+                        .max()
+                        .unwrap_or(0);
+                    if *best_overlap > best_possible_competitor {
+                        return Ok(Some((*best_key).clone()));
+                    }
+                }
+            }
+            if candidates.is_empty() {
+                return Ok(None);
+            }
+        }
+
+        Ok(candidates
+            .into_iter()
+            .filter(|(_, overlap)| *overlap >= min_overlap)
+            .max_by_key(|(_, overlap)| *overlap)
+            .map(|(key, _)| key))
+    }
+
     fn gather_candidates(
         &self,
         query: &S,
@@ -142,6 +230,14 @@ where
     type Error = IndexError;
 
     fn get(&self, query: &S) -> Result<Option<K>, Self::Error> {
+        let config = self.config();
+        let min_overlap = config
+            .min_jaccard
+            .map(|threshold| min_overlap_for_jaccard(threshold, query.len()))
+            .unwrap_or(1);
+        if config.rare_first && min_overlap > 1 {
+            return self.rare_first_best(query, &config, min_overlap);
+        }
         Ok(self.top_k(query, 1)?.into_iter().next().map(|result| result.0))
     }
 
@@ -442,6 +538,38 @@ mod tests {
         let results = index.top_k(&target, 5).unwrap();
         assert_eq!(results[0].0, 99);
         assert!((results[0].1 - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rare_first_top1_returns_the_unique_best_candidate() {
+        let index = idx_with(SearchConfig {
+            rare_first: true,
+            min_jaccard: Some(0.5),
+            ..SearchConfig::default()
+        });
+        let query = mk([1, 2, 3, 4, 5, 6]);
+        index.put(&999, query).unwrap();
+        for (key, feature) in (10..16_u64).zip(1..=6_u32) {
+            index
+                .put(
+                    &key,
+                    mk([
+                        feature,
+                        100 + feature,
+                        200 + feature,
+                        300 + feature,
+                        400 + feature,
+                        500 + feature,
+                    ]),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(index.get(&query).unwrap(), Some(999));
+        assert_eq!(
+            index.get(&query).unwrap(),
+            index.top_k(&query, 1).unwrap().first().map(|r| r.0)
+        );
     }
 
     #[test]

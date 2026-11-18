@@ -60,6 +60,57 @@ where
         Ok(postings.get(&feature).map(|keys| keys.iter().cloned().collect()).unwrap_or_default())
     }
 
+    fn posting_len(&self, feature: F) -> Result<usize, IndexError> {
+        let postings = self.postings_read();
+        Ok(postings.get(&feature).map_or(0, HashSet::len))
+    }
+
+    fn accumulate_posting(
+        &self,
+        feature: F,
+        candidates: &mut HashMap<K, usize>,
+    ) -> Result<usize, IndexError> {
+        let postings = self.postings_read();
+        let Some(keys) = postings.get(&feature) else {
+            return Ok(0);
+        };
+        for key in keys {
+            *candidates.entry(key.clone()).or_default() += 1;
+        }
+        Ok(keys.len())
+    }
+
+    fn verify_candidates(
+        &self,
+        feature: F,
+        candidates: &mut HashMap<K, usize>,
+    ) -> Result<super::CandidateVerification, IndexError> {
+        let postings = self.postings_read();
+        let Some(keys) = postings.get(&feature) else {
+            return Ok(Default::default());
+        };
+        let mut work = super::CandidateVerification::default();
+        // Hash collections iterate over capacity, so probe whichever collection is smaller.
+        if candidates.capacity() < keys.capacity() {
+            work.candidate_probes = candidates.len();
+            for (key, overlap) in candidates.iter_mut() {
+                if keys.contains(key) {
+                    *overlap += 1;
+                    work.matches += 1;
+                }
+            }
+        } else {
+            work.posting_visits = keys.len();
+            for key in keys {
+                if let Some(overlap) = candidates.get_mut(key) {
+                    *overlap += 1;
+                    work.matches += 1;
+                }
+            }
+        }
+        Ok(work)
+    }
+
     fn insert_posting(&self, feature: F, key: K) -> Result<(), IndexError> {
         self.postings_write().entry(feature).or_default().insert(key);
         Ok(())
@@ -130,6 +181,30 @@ mod tests {
         store.insert_posting(100, 42).unwrap();
         store.insert_posting(100, 42).unwrap();
         assert_eq!(store.posting_list(100).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn posting_accumulation_and_candidate_verification_preserve_overlap_counts() {
+        let store = Mock::new();
+        for key in 0..1000 {
+            store.insert_posting(1, key).unwrap();
+        }
+        let mut candidates = HashMap::from([(2, 5), (999, 1), (5000, 4)]);
+        assert_eq!(store.posting_len(1).unwrap(), 1000);
+        let work = store.verify_candidates(1, &mut candidates).unwrap();
+        assert_eq!(work.matches, 2);
+        assert_eq!(work.candidate_probes, 3);
+        assert_eq!(candidates[&999], 2);
+
+        let mut accumulated = HashMap::new();
+        assert_eq!(store.accumulate_posting(1, &mut accumulated).unwrap(), 1000);
+        assert_eq!(accumulated.len(), 1000);
+
+        store.insert_posting(2, 2).unwrap();
+        candidates.insert(2, 4);
+        let work = store.verify_candidates(2, &mut candidates).unwrap();
+        assert_eq!(work.matches, 1);
+        assert_eq!(candidates[&2], 5);
     }
 
     #[test]
