@@ -1,0 +1,10 @@
+[package]
+name = "marline_cdc"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+blake3.workspace = true
+marline_utils = { path = "../marline_utils" }

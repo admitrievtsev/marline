@@ -1,0 +1,6 @@
+[package]
+name = "marline_utils"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
