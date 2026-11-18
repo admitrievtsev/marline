@@ -248,7 +248,7 @@ mod tests {
         let vals: [u32; 6] =
             query.iter().map(SuperFeature::value).collect::<Vec<_>>().try_into().unwrap();
         let query_sketch = U32Sketch::new(vals);
-        let expected = table.index.top_k(&query_sketch, 1).unwrap()[0].0;
+        let expected = table.index.top_k(&query_sketch, 1).unwrap()[0].0.clone();
         table.store.calls.posting_list_calls.store(0, Ordering::Relaxed);
         table.store.calls.posting_len_calls.store(0, Ordering::Relaxed);
         table.store.calls.accumulation_calls.store(0, Ordering::Relaxed);

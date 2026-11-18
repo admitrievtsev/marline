@@ -7,7 +7,7 @@ use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{DataContainer, FileSystem};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
-use marline_palantir::lifecycle_manager::LifecycleManager;
+use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
 use marline_palantir::palantir_scrubber::PalantirScrubber;
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::TierConfig;
@@ -144,6 +144,7 @@ fn run_sbc<const N: usize>(
     features_num_override: Option<usize>,
     search_config: &SearchConfig,
     alpha: Option<f64>,
+    lifecycle_configs: [LifecycleTierConfig; N],
 ) {
     let tier_list: [u32; N] = tier_list.try_into().expect("tier count must match N");
     let sf_gen = if let Some(features_num) = features_num_override {
@@ -159,7 +160,7 @@ fn run_sbc<const N: usize>(
         sf_gen,
         GdeltaEncoder,
         tier_config,
-        LifecycleManager::<N>::default_configs(),
+        lifecycle_configs,
         search_config.clone(),
     );
     scrubber.set_delta_promote_threshold(alpha);
@@ -290,6 +291,7 @@ fn main() {
                         cfg.features_num_override,
                         &sc,
                         alpha,
+                        LifecycleManager::<1>::default_configs(),
                     );
                 }
                 2 => {
@@ -300,6 +302,7 @@ fn main() {
                         cfg.features_num_override,
                         &sc,
                         alpha,
+                        LifecycleManager::<2>::default_configs(),
                     );
                 }
                 3 => {
@@ -310,6 +313,7 @@ fn main() {
                         cfg.features_num_override,
                         &sc,
                         alpha,
+                        LifecycleManager::<3>::default_configs(),
                     );
                 }
                 4 => {
@@ -320,6 +324,7 @@ fn main() {
                         cfg.features_num_override,
                         &sc,
                         alpha,
+                        LifecycleManager::<4>::default_configs(),
                     );
                 }
                 5 => {
@@ -330,6 +335,7 @@ fn main() {
                         cfg.features_num_override,
                         &sc,
                         alpha,
+                        LifecycleManager::<5>::default_configs(),
                     );
                 }
                 _ => unreachable!(),
