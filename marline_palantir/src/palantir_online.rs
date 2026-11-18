@@ -7,10 +7,17 @@ use crate::palantir_scrubber::get_entry;
 use crate::sf_generator::SuperFeatureGenerator;
 use crate::types::{BlockID, TierConfig};
 use chunkfs::{ChunkHash, Database};
-use marline_cdc::{collect_raw_features, ChunkerBuilder};
+use marline_cdc::{collect_raw_features, FastCDC};
+use marline_utils::{MB, KB};
 use marline_index::heuristic_index::SearchConfig;
 use std::collections::HashMap;
 use std::hash::Hash;
+
+// Chunk sizes of the online pipeline. `CHUNK_MIN_SIZE` is also the start of the
+// feature-collection window inside each chunk.
+const CHUNK_MIN_SIZE: usize = 512 * KB;
+const CHUNK_AVG_SIZE: usize = MB;
+const CHUNK_MAX_SIZE: usize = 2 * MB;
 
 pub trait OnlineSBC<
     S,
@@ -55,8 +62,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
     for PalantirOnline<S, [u8; 32], E, N>
 {
     fn write(&mut self, data: &[u8]) -> Result<(), PalantirError> {
-        let builder = ChunkerBuilder::default();
-        let chunker = builder.chunker(data);
+        let chunker = FastCDC::new(data, CHUNK_MIN_SIZE, CHUNK_AVG_SIZE, CHUNK_MAX_SIZE);
 
         for (chunk, sf_raw) in chunker {
             let chunk_data = &data[chunk.offset..chunk.offset + chunk.length].to_vec();
@@ -74,7 +80,7 @@ impl<S: SuperFeatureGenerator, E: PalantirEncoder, const N: usize> OnlineSBC<S, 
                         // Baseline: recompute features with a second scan
                         // over the chunk data instead of reusing the
                         // in-pass features.
-                        let sf = collect_raw_features(chunk_data, builder.min_size());
+                        let sf = collect_raw_features(chunk_data, CHUNK_MIN_SIZE);
                         debug_assert!(sf == sf_raw, "two-pass features must equal in-pass");
                         self.sf_gen.generate_from_raw(&sf)
                     } else {

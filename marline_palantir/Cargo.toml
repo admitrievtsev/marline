@@ -14,6 +14,7 @@ marline_cdc = {path = "../marline_cdc"}
 marline_sketcher = {path = "../marline_sketcher"}
 marline_scrub = {path = "../marline_scrub"}
 marline_index = {path = "../marline_index"}
+marline_utils = {path = "../marline_utils"}
 zstd.workspace = true
 num = "0.4"
 blake3.workspace = true

@@ -1,7 +1,4 @@
 //! Content-defined chunking (FastCDC v2020) with in-pass feature collection.
-//!
-//! [`ChunkerBuilder`] is the entry point: it validates chunk size parameters and
-//! builds slice ([`FastCDC`]) and streaming ([`StreamCDC`]) chunkers.
 
 #[doc(hidden)]
 pub mod fastcdc;
@@ -10,72 +7,17 @@ pub use fastcdc::{
     collect_raw_features, Chunk, ChunkData, Error as StreamError, FastCDC, StreamCDC,
 };
 
-use marline_utils::{KB, MB};
-
-use fastcdc::{AVERAGE_MAX, AVERAGE_MIN, MAXIMUM_MAX, MAXIMUM_MIN, MINIMUM_MAX, MINIMUM_MIN};
-
-/// Validates chunk size parameters and builds content-defined chunkers.
-#[derive(Debug, Clone, Copy)]
-pub struct ChunkerBuilder {
-    min_size: usize,
-    avg_size: usize,
-    max_size: usize,
-}
-
-/// Default sizes: 512 KB minimum, 1 MB average and 2 MB maximum chunk size.
-impl Default for ChunkerBuilder {
-    fn default() -> Self {
-        Self { min_size: 512 * KB, avg_size: MB, max_size: 2 * MB }
-    }
-}
-
-impl ChunkerBuilder {
-    /// Creates a builder from minimum, average and maximum chunk sizes in bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any size is outside its supported range (`min_size` in `64..=1 MiB`,
-    /// `avg_size` in `256..=4 MiB`, `max_size` in `1 KiB..=16 MiB`)
-    /// or the sizes are not ordered as `min_size <= avg_size <= max_size`.
-    pub fn new(min_size: usize, avg_size: usize, max_size: usize) -> Self {
-        let valid = (MINIMUM_MIN..=MINIMUM_MAX).contains(&min_size)
-            && (AVERAGE_MIN..=AVERAGE_MAX).contains(&avg_size)
-            && (MAXIMUM_MIN..=MAXIMUM_MAX).contains(&max_size)
-            && min_size <= avg_size
-            && avg_size <= max_size;
-        assert!(valid, "invalid chunk sizes: min={min_size}, avg={avg_size}, max={max_size}");
-        Self { min_size, avg_size, max_size }
-    }
-
-    /// Minimum chunk size; also the start of the feature-collection window inside each chunk.
-    pub fn min_size(&self) -> usize {
-        self.min_size
-    }
-
-    /// Splits an in-memory buffer into content-defined chunks.
-    ///
-    /// The iterator yields each chunk together with its raw features. Every chunk
-    /// except the last one is at least `min_size` bytes; the last one may be shorter.
-    /// An empty input yields no chunks.
-    pub fn chunker<'a>(&self, data: &'a [u8]) -> FastCDC<'a> {
-        FastCDC::new(data, self.min_size, self.avg_size, self.max_size)
-    }
-
-    /// Splits a byte stream into content-defined chunks.
-    ///
-    /// Produces the same chunks and features as [`Self::chunker`] on the same bytes.
-    /// Every chunk except the last one is at least `min_size` bytes; the last one may
-    /// be shorter. An empty stream yields no chunks. Read failures are reported as
-    /// [`StreamError::IoError`].
-    pub fn stream_chunker<R: std::io::Read>(&self, reader: R) -> StreamCDC<R> {
-        StreamCDC::new(reader, self.min_size, self.avg_size, self.max_size)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fastcdc::{AVERAGE_MIN, MAXIMUM_MIN, MINIMUM_MIN};
+    use marline_utils::{KB, MB};
     use std::io::{self, Cursor, Read};
+
+    // Production-scale chunk sizes: 512 KB minimum, 1 MB average, 2 MB maximum.
+    const DEFAULT_MIN: usize = 512 * KB;
+    const DEFAULT_AVG: usize = MB;
+    const DEFAULT_MAX: usize = 2 * MB;
 
     /// Advances a xorshift64 state (Marsaglia, 2003) and returns the new state.
     fn xorshift64(state: &mut u64) -> u64 {
@@ -201,107 +143,34 @@ mod tests {
         }
     }
 
-    // `new` must reject sizes outside the FastCDC bounds and unordered sizes: the vendored
-    // `fastcdc.rs` checks them only with `debug_assert!`, so in release builds invalid sizes
-    // lead to out-of-bounds panics, endless empty chunks, lost data or undersized chunks.
-    // `min_size == 0` also divides by zero in the vendored `size_hint`.
     #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_min_below_range() {
-        ChunkerBuilder::new(MINIMUM_MIN - 1, 256, 1024);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_min_zero() {
-        ChunkerBuilder::new(0, 256, 1024);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_min_above_range() {
-        ChunkerBuilder::new(MINIMUM_MAX + 1, AVERAGE_MAX, MAXIMUM_MAX);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_avg_below_range() {
-        ChunkerBuilder::new(64, AVERAGE_MIN - 1, 1024);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_avg_above_range() {
-        ChunkerBuilder::new(64, AVERAGE_MAX + 1, MAXIMUM_MAX);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_max_below_range() {
-        ChunkerBuilder::new(64, 256, MAXIMUM_MIN - 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_max_above_range() {
-        ChunkerBuilder::new(64, 256, MAXIMUM_MAX + 1);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_min_above_avg() {
-        ChunkerBuilder::new(4096, 1024, 8192);
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid chunk sizes")]
-    fn test_new_rejects_avg_above_max() {
-        ChunkerBuilder::new(256, 4096, 2048);
-    }
-
-    #[test]
-    fn test_new_accepts_range_bounds() {
-        // Upper bounds must not panic.
-        ChunkerBuilder::new(MINIMUM_MAX, AVERAGE_MAX, MAXIMUM_MAX);
-
-        let builder = ChunkerBuilder::new(MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN);
+    fn test_chunker_at_lower_size_bounds() {
         let data = generate_test_data(64 * KB);
-        let chunks: Vec<_> = builder.chunker(&data).collect();
+        let chunks: Vec<_> = FastCDC::new(&data, MINIMUM_MIN, AVERAGE_MIN, MAXIMUM_MIN).collect();
         assert_chunk_layout(&chunks, data.len(), MINIMUM_MIN, MAXIMUM_MIN);
     }
 
     #[test]
-    fn test_default_is_valid() {
-        let d = ChunkerBuilder::default();
-        // The default sizes must pass the same validation as user-supplied ones.
-        ChunkerBuilder::new(d.min_size, d.avg_size, d.max_size);
-    }
-
-    #[test]
-    fn test_default_chunker_invariants() {
-        let builder = ChunkerBuilder::default();
+    fn test_chunker_invariants_at_default_sizes() {
         let data = generate_test_data(6 * MB);
-        let chunks: Vec<_> = builder.chunker(&data).collect();
+        let chunks: Vec<_> = FastCDC::new(&data, DEFAULT_MIN, DEFAULT_AVG, DEFAULT_MAX).collect();
 
         assert!(chunks.len() >= 2, "6 MB input must produce several chunks, got {}", chunks.len());
-        assert_chunk_layout(&chunks, data.len(), builder.min_size, builder.max_size);
+        assert_chunk_layout(&chunks, data.len(), DEFAULT_MIN, DEFAULT_MAX);
     }
 
     #[test]
     fn test_chunker_empty() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data: &[u8] = &[];
-        let chunks: Vec<_> = builder.chunker(data).collect();
+        let chunks: Vec<_> = FastCDC::new(data, 256, 1024, 4096).collect();
 
         assert!(chunks.is_empty(), "Empty input should not yield any chunks");
     }
 
     #[test]
     fn test_stream_chunker_empty() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let reader = Cursor::new(Vec::<u8>::new());
-        let chunks: Vec<_> = builder
-            .stream_chunker(reader)
+        let chunks: Vec<_> = StreamCDC::new(reader, 256, 1024, 4096)
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading an empty stream should succeed");
 
@@ -310,9 +179,8 @@ mod tests {
 
     #[test]
     fn test_chunker_data_smaller_than_min_size() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(128); // Smaller than min_size (256)
-        let chunks: Vec<_> = builder.chunker(&data).collect();
+        let chunks: Vec<_> = FastCDC::new(&data, 256, 1024, 4096).collect();
 
         assert_eq!(chunks.len(), 1, "Exactly one trailing chunk should be produced");
 
@@ -324,10 +192,8 @@ mod tests {
     #[test]
     fn test_chunker_invariants() {
         let (min_size, avg_size, max_size) = (256, 1024, 4096);
-        let builder = ChunkerBuilder::new(min_size, avg_size, max_size);
-
         let data = generate_test_data(64 * KB);
-        let chunks: Vec<_> = builder.chunker(&data).collect();
+        let chunks: Vec<_> = FastCDC::new(&data, min_size, avg_size, max_size).collect();
 
         assert!(!chunks.is_empty());
         assert_chunk_layout(&chunks, data.len(), min_size, max_size);
@@ -336,12 +202,11 @@ mod tests {
     #[test]
     fn test_uniform_data_hits_max_size() {
         let max_size = 4096;
-        let builder = ChunkerBuilder::new(256, 1024, max_size);
 
         // All-zero input is a deliberate pathological case: the rolling hash never
         // finds a content-defined cut point, so every cut is forced at max_size.
         let data = vec![0u8; 20 * KB];
-        let chunks: Vec<_> = builder.chunker(&data).collect();
+        let chunks: Vec<_> = FastCDC::new(&data, 256, 1024, max_size).collect();
 
         assert_eq!(chunks.len(), 5);
         for (i, (chunk, _)) in chunks.iter().enumerate() {
@@ -352,12 +217,10 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_matches_chunker() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
-        let slice_chunks: Vec<_> = builder.chunker(&data).collect();
-        let stream_chunks: Vec<_> = builder
-            .stream_chunker(Cursor::new(&data))
+        let slice_chunks: Vec<_> = FastCDC::new(&data, 256, 1024, 4096).collect();
+        let stream_chunks: Vec<_> = StreamCDC::new(Cursor::new(&data), 256, 1024, 4096)
             .collect::<Result<Vec<_>, _>>()
             .expect("Reading from Cursor should not fail");
 
@@ -366,13 +229,11 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_short_reads_match_chunker() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let data = generate_test_data(32 * KB);
 
-        let slice_chunks: Vec<_> = builder.chunker(&data).collect();
+        let slice_chunks: Vec<_> = FastCDC::new(&data, 256, 1024, 4096).collect();
         let reader = ShortReader { data: &data, pos: 0, state: 0x0123_4567_89AB_CDEF };
-        let stream_chunks: Vec<_> = builder
-            .stream_chunker(reader)
+        let stream_chunks: Vec<_> = StreamCDC::new(reader, 256, 1024, 4096)
             .collect::<Result<Vec<_>, _>>()
             .expect("Short reads should not fail");
 
@@ -381,10 +242,9 @@ mod tests {
 
     #[test]
     fn test_stream_chunker_propagates_read_error() {
-        let builder = ChunkerBuilder::new(256, 1024, 4096);
         let reader = FailingReader { data: generate_test_data(1000), pos: 0 };
 
-        let first = builder.stream_chunker(reader).next();
+        let first = StreamCDC::new(reader, 256, 1024, 4096).next();
         assert!(
             matches!(first, Some(Err(StreamError::IoError(_)))),
             "Read failure must surface as StreamError::IoError, got {first:?}"
