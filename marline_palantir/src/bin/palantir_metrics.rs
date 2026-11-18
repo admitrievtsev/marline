@@ -151,10 +151,14 @@ fn run_sbc<const N: usize>(
     } else {
         PalantirHasher::new(7, tier_list.to_vec())
     };
+    let tier_config = match features_num_override {
+        Some(features_num) => TierConfig::<N>::with_features_num(tier_list, features_num),
+        None => TierConfig::<N>::new(tier_list),
+    };
     let mut scrubber = PalantirScrubber::new(
         sf_gen,
         GdeltaEncoder,
-        TierConfig::<N>::new(tier_list),
+        tier_config,
         LifecycleManager::<N>::default_configs(),
         search_config.clone(),
     );
