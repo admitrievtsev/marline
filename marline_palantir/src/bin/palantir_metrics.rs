@@ -7,8 +7,8 @@ use chunkfs::hashers::Sha256Hasher;
 use chunkfs::{DataContainer, FileSystem};
 use marline_index::heuristic_index::SearchConfig;
 use marline_palantir::encoder::GdeltaEncoder;
-use marline_palantir::lifecycle_manager::LifecycleManager;
-use marline_palantir::palantir_online::{OnlineSBC, PalantirOnline};
+use marline_palantir::lifecycle_manager::{LifecycleManager, LifecycleTierConfig};
+use marline_palantir::palantir_scrubber::PalantirScrubber;
 use marline_palantir::sf_generator::PalantirHasher;
 use marline_palantir::types::TierConfig;
 
@@ -83,7 +83,6 @@ fn collect_files(dir: &Path, files: &mut Vec<Vec<u8>>) {
     }
 }
 
-#[allow(dead_code)]
 fn run_metrics(
     name: &str,
     scrubber: impl chunkfs::Scrub<
@@ -134,50 +133,38 @@ fn run_metrics(
     );
 }
 
-#[allow(dead_code)]
-fn run_sbc(name: &str, kernel_files: &[Vec<Vec<u8>>]) {
-    let encoder = GdeltaEncoder {};
-    let sf_gen = PalantirHasher::new(7, vec![2, 3, 4]);
-    let mut online_sbc = PalantirOnline::new(
-        sf_gen,
-        encoder,
-        TierConfig { tier_list: [2, 3, 4], features_num: None },
-        LifecycleManager::<3>::default_configs(),
-        Default::default(),
-    );
+fn alpha_from_env() -> Result<Option<f64>, std::num::ParseFloatError> {
+    std::env::var("MARLINE_ALPHA").ok().map(|value| value.parse::<f64>()).transpose()
+}
 
-    let original_total: usize = kernel_files.iter().flat_map(|f| f.iter()).map(|d| d.len()).sum();
-    let mut aged_files = vec![];
-    for files in kernel_files {
-        // println!("{}", files.len());
-        let mut a = vec![];
-        for data in files {
-            a.extend_from_slice(data);
-        }
-        aged_files.push(a);
-    }
-    let start = Instant::now();
-    println!("Files to write: {}", aged_files.len());
-    for file in aged_files {
-        online_sbc.write(&file).unwrap();
-    }
-
-    let elapsed = start.elapsed();
-
-    let total_ratio = original_total as f64 / online_sbc.bytes_stored() as f64;
-
-    let stored_mb = (original_total as f64 / total_ratio) / (1024.0 * 1024.0);
-    let orig_mb = original_total as f64 / (1024.0 * 1024.0);
-    let mbps = if elapsed.as_secs_f64() > 0.0 {
-        original_total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0)
+fn run_sbc<const N: usize>(
+    name: &str,
+    kernel_files: &[Vec<Vec<u8>>],
+    tier_list: &[u32],
+    features_num_override: Option<usize>,
+    search_config: &SearchConfig,
+    alpha: Option<f64>,
+    lifecycle_configs: [LifecycleTierConfig; N],
+) {
+    let tier_list: [u32; N] = tier_list.try_into().expect("tier count must match N");
+    let sf_gen = if let Some(features_num) = features_num_override {
+        PalantirHasher::with_features_num(7, tier_list.to_vec(), features_num)
     } else {
-        0.0
+        PalantirHasher::new(7, tier_list.to_vec())
     };
-
-    println!(
-        "{:<20} cdc={:<8.4} total_dedup={:<8.4} stored_mb={:<10.3} orig_mb={:<10.3} elapsed_s={:<10.2} mbps={:.2}",
-        name, 1.0f64, total_ratio, stored_mb, orig_mb, elapsed.as_secs_f64(), mbps,
+    let tier_config = match features_num_override {
+        Some(features_num) => TierConfig::<N>::with_features_num(tier_list, features_num),
+        None => TierConfig::<N>::new(tier_list),
+    };
+    let mut scrubber = PalantirScrubber::new(
+        sf_gen,
+        GdeltaEncoder,
+        tier_config,
+        lifecycle_configs,
+        search_config.clone(),
     );
+    scrubber.set_delta_promote_threshold(alpha);
+    run_metrics(&format!("{name} alpha={alpha:?}"), scrubber, kernel_files);
 }
 
 fn ensure_datasets() -> Vec<std::path::PathBuf> {
@@ -267,6 +254,9 @@ fn download_kernel(version: &str, base: &std::path::Path) {
 }
 
 fn main() {
+    let alpha = alpha_from_env()
+        .expect("MARLINE_ALPHA must be a floating point number when set")
+        .filter(|value| value.is_finite() && *value > 0.0);
     let kernel_dirs = ensure_datasets();
 
     let mut kernel_files: Vec<Vec<Vec<u8>>> = Vec::new();
@@ -290,29 +280,63 @@ fn main() {
 
     for cfg in configs() {
         for sc in search_config_grid() {
-            let _sf_gen = if let Some(fn_val) = cfg.features_num_override {
-                PalantirHasher::with_features_num(7, cfg.tier_list.clone(), fn_val)
-            } else {
-                PalantirHasher::new(7, cfg.tier_list.clone())
-            };
-
             let name = format!("{} | {}", cfg.name, fmt_sc(&sc));
 
             match cfg.tier_list.len() {
                 1 => {
-                    run_sbc(&name, &kernel_files);
+                    run_sbc::<1>(
+                        &name,
+                        &kernel_files,
+                        &cfg.tier_list,
+                        cfg.features_num_override,
+                        &sc,
+                        alpha,
+                        LifecycleManager::<1>::default_configs(),
+                    );
                 }
                 2 => {
-                    run_sbc(&name, &kernel_files);
+                    run_sbc::<2>(
+                        &name,
+                        &kernel_files,
+                        &cfg.tier_list,
+                        cfg.features_num_override,
+                        &sc,
+                        alpha,
+                        LifecycleManager::<2>::default_configs(),
+                    );
                 }
                 3 => {
-                    run_sbc(&name, &kernel_files);
+                    run_sbc::<3>(
+                        &name,
+                        &kernel_files,
+                        &cfg.tier_list,
+                        cfg.features_num_override,
+                        &sc,
+                        alpha,
+                        LifecycleManager::<3>::default_configs(),
+                    );
                 }
                 4 => {
-                    run_sbc(&name, &kernel_files);
+                    run_sbc::<4>(
+                        &name,
+                        &kernel_files,
+                        &cfg.tier_list,
+                        cfg.features_num_override,
+                        &sc,
+                        alpha,
+                        LifecycleManager::<4>::default_configs(),
+                    );
                 }
                 5 => {
-                    run_sbc(&name, &kernel_files);
+                    run_sbc::<5>(
+                        &name,
+                        &kernel_files,
+                        &cfg.tier_list,
+                        cfg.features_num_override,
+                        &sc,
+                        alpha,
+                        LifecycleManager::<5>::default_configs(),
+                    );
                 }
                 _ => unreachable!(),
             }
